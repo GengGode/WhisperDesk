@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::models::audio::{AudioFileMeta, TranscriptionResult, TranscriptionSegment, TranscriptionStatus};
 use crate::models::error::AppError;
-use crate::services::audio::decode_to_16k_mono;
+use crate::services::audio::probe_audio_metadata;
 use crate::services::paths;
 
 pub struct FileIndexService {
@@ -102,8 +102,8 @@ impl FileIndexService {
             return Err(AppError::FileSystem("音频文件不存在".to_string()));
         }
 
-        let decoded = decode_to_16k_mono(path)?;
-        let metadata = fs::metadata(path)?;
+        let meta = probe_audio_metadata(path)?;
+        let file_meta = fs::metadata(path)?;
         let extension = path
             .extension()
             .and_then(|e| e.to_str())
@@ -119,10 +119,10 @@ impl FileIndexService {
                 .to_string(),
             path: path.to_string_lossy().to_string(),
             format: extension,
-            duration: decoded.duration_seconds,
-            sample_rate: decoded.source_sample_rate,
-            channels: decoded.source_channels as u16,
-            size: metadata.len(),
+            duration: meta.duration_seconds,
+            sample_rate: meta.sample_rate,
+            channels: meta.channels as u16,
+            size: file_meta.len(),
             created_at: Utc::now().to_rfc3339(),
             transcription_status: TranscriptionStatus::Pending,
         };

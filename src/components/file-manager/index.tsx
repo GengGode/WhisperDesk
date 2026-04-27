@@ -1,5 +1,11 @@
+import { useState, useCallback } from "react";
 import { useAudioStore } from "@/stores/audio-store";
-import { importAudioFolder, selectAudioFile } from "@/lib/tauri";
+import {
+  importAudioFolder,
+  selectAudioFile,
+  listenImportFolderProgress,
+  type ImportFolderProgress,
+} from "@/lib/tauri";
 
 export function FileManager() {
   const files = useAudioStore((s) => s.files);
@@ -8,28 +14,44 @@ export function FileManager() {
   const addFile = useAudioStore((s) => s.addFile);
   const mergeFiles = useAudioStore((s) => s.mergeFiles);
 
+  const [importProgress, setImportProgress] =
+    useState<ImportFolderProgress | null>(null);
+
+  const handleImportFolder = useCallback(async () => {
+    try {
+      console.log("[文件] 开始导入文件夹");
+      const unlisten = await listenImportFolderProgress((p) => {
+        setImportProgress(p);
+      });
+      try {
+        const imported = await importAudioFolder();
+        console.log("[文件] 导入文件夹结果", imported);
+        if (imported.length > 0) {
+          mergeFiles(imported);
+          selectFile(imported[0].id);
+        }
+      } finally {
+        unlisten();
+        setImportProgress(null);
+      }
+    } catch (err) {
+      console.error("[文件] 导入文件夹失败", err);
+    }
+  }, [mergeFiles, selectFile]);
+
   return (
     <div className="flex flex-1 flex-col">
       <header className="flex h-14 items-center justify-between border-b border-border px-6">
         <h2 className="text-base font-medium">音频文件</h2>
         <div className="flex items-center gap-2">
           <button
-            className="rounded-lg border border-border px-4 py-1.5 text-sm transition-colors hover:bg-surface-secondary"
-            onClick={async () => {
-              try {
-                console.log("[文件] 开始导入文件夹");
-                const imported = await importAudioFolder();
-                console.log("[文件] 导入文件夹结果", imported);
-                if (imported.length > 0) {
-                  mergeFiles(imported);
-                  selectFile(imported[0].id);
-                }
-              } catch (err) {
-                console.error("[文件] 导入文件夹失败", err);
-              }
-            }}
+            className="rounded-lg border border-border px-4 py-1.5 text-sm transition-colors hover:bg-surface-secondary disabled:opacity-50"
+            onClick={handleImportFolder}
+            disabled={importProgress !== null}
           >
-            导入文件夹
+            {importProgress
+              ? `导入中 ${importProgress.current}/${importProgress.total}`
+              : "导入文件夹"}
           </button>
           <button
             className="rounded-lg bg-primary px-4 py-1.5 text-sm text-white transition-colors hover:bg-primary-hover"
@@ -50,6 +72,25 @@ export function FileManager() {
           </button>
         </div>
       </header>
+
+      {importProgress && (
+        <div className="border-b border-border bg-surface-secondary/50 px-6 py-2">
+          <div className="mb-1 flex items-center justify-between text-xs text-text-secondary">
+            <span className="truncate">{importProgress.currentName}</span>
+            <span className="ml-2 shrink-0">
+              {importProgress.current}/{importProgress.total}
+            </span>
+          </div>
+          <div className="h-1 overflow-hidden rounded-full bg-border">
+            <div
+              className="h-full rounded-full bg-primary transition-all"
+              style={{
+                width: `${(importProgress.current / importProgress.total) * 100}%`,
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-4">
         {files.length === 0 ? (

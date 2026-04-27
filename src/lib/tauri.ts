@@ -71,6 +71,20 @@ export function listenModelDownloadProgress(
   );
 }
 
+export interface ImportFolderProgress {
+  total: number;
+  current: number;
+  currentName: string;
+}
+
+export function listenImportFolderProgress(
+  cb: (progress: ImportFolderProgress) => void,
+) {
+  return listen<ImportFolderProgress>("import-folder-progress", (event) => {
+    cb(event.payload);
+  });
+}
+
 export const exportFormats: ExportFormat[] = ["txt", "srt", "json"];
 
 export async function listModels(): Promise<WhisperModel[]> {

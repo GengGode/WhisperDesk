@@ -12,8 +12,64 @@ use symphonia::default::{get_codecs, get_probe};
 
 use crate::models::error::AppError;
 
+/// 仅从文件头读取的轻量元数据，不解码任何音频数据
+pub struct AudioMetadata {
+    pub sample_rate: u32,
+    pub channels: usize,
+    pub duration_seconds: f64,
+}
+
+/// 只读取文件头获取元数据，不解码音频数据。
+/// 比 decode_to_16k_mono 快几个数量级。
+pub fn probe_audio_metadata(path: &Path) -> Result<AudioMetadata, AppError> {
+    let file = File::open(path).map_err(|e| AppError::Audio(format!("打开音频失败: {e}")))?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| AppError::Audio(format!("探测音频格式失败: {e}")))?;
+
+    let track = probed
+        .format
+        .default_track()
+        .ok_or_else(|| AppError::Audio("未找到默认音轨".to_string()))?;
+
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .ok_or_else(|| AppError::Audio("无法读取采样率".to_string()))?;
+
+    let channels = track
+        .codec_params
+        .channels
+        .map(|c| c.count())
+        .ok_or_else(|| AppError::Audio("无法读取声道数".to_string()))?;
+
+    let duration_seconds = match (track.codec_params.n_frames, track.codec_params.time_base) {
+        (Some(n), Some(tb)) => n as f64 * tb.numer as f64 / tb.denom as f64,
+        (Some(n), None) if sample_rate > 0 => n as f64 / sample_rate as f64,
+        _ => 0.0,
+    };
+
+    Ok(AudioMetadata {
+        sample_rate,
+        channels,
+        duration_seconds,
+    })
+}
+
+#[allow(dead_code)]
 pub struct DecodedAudio {
-    #[cfg_attr(not(feature = "whisper-rs-backend"), allow(dead_code))]
     pub samples_16k_mono: Vec<f32>,
     pub source_sample_rate: u32,
     pub source_channels: usize,

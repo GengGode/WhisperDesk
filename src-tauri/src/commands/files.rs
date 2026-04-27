@@ -1,12 +1,21 @@
 use std::path::{Path, PathBuf};
 
-use tauri::AppHandle;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::DialogExt;
 use walkdir::WalkDir;
 
 use crate::models::audio::AudioFileMeta;
 use crate::models::error::AppError;
 use crate::services::file_index::FileIndexService;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportFolderProgress {
+    total: usize,
+    current: usize,
+    current_name: String,
+}
 
 #[tauri::command]
 pub fn select_audio_file(app: AppHandle) -> Result<Option<AudioFileMeta>, AppError> {
@@ -41,15 +50,29 @@ pub fn import_audio_folder(app: AppHandle) -> Result<Vec<AudioFileMeta>, AppErro
         return Ok(vec![]);
     };
 
-    let mut imported = Vec::new();
-    for entry in WalkDir::new(folder_path)
+    let audio_entries: Vec<_> = WalkDir::new(folder_path)
         .into_iter()
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file())
-    {
-        if !is_audio_file(entry.path()) {
-            continue;
-        }
+        .filter(|entry| entry.file_type().is_file() && is_audio_file(entry.path()))
+        .collect();
+
+    let total = audio_entries.len();
+    let mut imported = Vec::new();
+
+    for (i, entry) in audio_entries.iter().enumerate() {
+        let name = entry
+            .file_name()
+            .to_string_lossy()
+            .to_string();
+
+        let _ = app.emit(
+            "import-folder-progress",
+            ImportFolderProgress {
+                total,
+                current: i + 1,
+                current_name: name,
+            },
+        );
 
         if let Ok(file) = service.import_audio_file(entry.path()) {
             imported.push(file);
