@@ -384,7 +384,7 @@ export function SettingsPanel() {
                   step={1}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
                   value={settings.maxRepeatFilter}
-                  onChange={(e) => setSettings({ maxRepeatFilter: Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 3))) })}
+                  onChange={(e) => setSettings({ maxRepeatFilter: Math.max(0, Math.min(20, Math.round(e.target.value === '' ? 3 : Number(e.target.value)))) })}
                 />
               </label>
             </div>
