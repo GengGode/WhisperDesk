@@ -25,10 +25,24 @@ impl TranscriptionAbortFlag {
     }
 }
 
-/// 构造转录进度回调闭包（Window → Tauri event）
-fn make_progress_cb(window: &Window, audio_file_id: &str) -> impl Fn(f32, &str) + Clone + Send + 'static {
+/// 发射一次带 phase 的进度事件
+fn emit_progress(window: &Window, audio_file_id: &str, progress: f32, msg: &str, phase: &str) {
+    let _ = window.emit(
+        "transcription-progress",
+        TranscriptionProgressPayload {
+            audio_file_id: audio_file_id.to_string(),
+            progress,
+            current_segment: Some(msg.to_string()),
+            phase: Some(phase.to_string()),
+        },
+    );
+}
+
+/// 构造转录进度回调闭包（Window → Tauri event），固定 phase
+fn make_progress_cb(window: &Window, audio_file_id: &str, phase: &str) -> impl Fn(f32, &str) + Clone + Send + 'static {
     let w = window.clone();
     let fid = audio_file_id.to_string();
+    let ph = phase.to_string();
     move |progress: f32, msg: &str| {
         let _ = w.emit(
             "transcription-progress",
@@ -36,6 +50,7 @@ fn make_progress_cb(window: &Window, audio_file_id: &str) -> impl Fn(f32, &str) 
                 audio_file_id: fid.clone(),
                 progress,
                 current_segment: Some(msg.to_string()),
+                phase: Some(ph.clone()),
             },
         );
     }
@@ -84,15 +99,17 @@ pub async fn transcribe_audio(
 
     let result = if let Some(url) = request.remote_url.as_deref().filter(|u| !u.is_empty()) {
         log(&format!("[转录] 使用远程推理: {url}"));
+        emit_progress(&window, &request.audio_file_id, 0.0, "正在连接远程服务器...", "remote_connecting");
         let mut r = transcribe_via_remote(&window, url, &request).await?;
         r.audio_file_id = request.audio_file_id.clone();
         r
     } else {
         let transcriber = TranscriberService::portable()?;
         log("[转录] 开始本地推理...");
+        emit_progress(&window, &request.audio_file_id, 0.0, "开始本地推理...", "local");
         transcriber
             .transcribe(
-                make_progress_cb(&window, &request.audio_file_id),
+                make_progress_cb(&window, &request.audio_file_id, "local"),
                 make_model_dl_cb(&window),
                 log.clone(),
                 flag,
@@ -136,6 +153,15 @@ async fn transcribe_via_remote(
         .await
         .map_err(|e| AppError::FileSystem(format!("读取音频文件失败: {e}")))?;
 
+    let file_size_mb = audio_bytes.len() as f64 / (1024.0 * 1024.0);
+    emit_progress(
+        window,
+        &request.audio_file_id,
+        0.0,
+        &format!("正在上传音频文件 ({file_size_mb:.1} MB)..."),
+        "remote_uploading",
+    );
+
     let file_part = reqwest::multipart::Part::bytes(audio_bytes)
         .file_name("audio")
         .mime_str("application/octet-stream")
@@ -173,7 +199,15 @@ async fn transcribe_via_remote(
         )));
     }
 
-    let on_progress = make_progress_cb(window, &request.audio_file_id);
+    emit_progress(
+        window,
+        &request.audio_file_id,
+        0.0,
+        "远程服务器已接收，等待转录...",
+        "remote_transcribing",
+    );
+
+    let on_progress = make_progress_cb(window, &request.audio_file_id, "remote_transcribing");
     let mut result: Option<TranscriptionResult> = None;
     let mut current_event = String::new();
     let mut data_buf = String::new();
@@ -206,6 +240,13 @@ async fn transcribe_via_remote(
                         }
                     }
                     "complete" => {
+                        emit_progress(
+                            window,
+                            &request.audio_file_id,
+                            1.0,
+                            "远程转录完成",
+                            "complete",
+                        );
                         let r: TranscriptionResult = serde_json::from_str(&data_buf)
                             .map_err(|e| AppError::Transcription(format!("解析远程结果失败: {e}")))?;
                         result = Some(r);

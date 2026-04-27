@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhisperDesk 推理服务</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --border: #2a2d3a;
+    --text: #e4e6f0;
+    --text-dim: #8b8fa3;
+    --accent: #6366f1;
+    --green: #22c55e;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --yellow: #eab308;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  .container { max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+  h1 { font-size: 1.5rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .subtitle { color: var(--text-dim); font-size: 0.875rem; margin-bottom: 2rem; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 2rem; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1.25rem;
+  }
+  .card-label { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.5rem; }
+  .card-value { font-size: 1.5rem; font-weight: 700; }
+  .card-value.green { color: var(--green); }
+  .card-value.blue { color: var(--blue); }
+
+  .section-title {
+    font-size: 1rem; font-weight: 600;
+    margin-bottom: 1rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .badge {
+    font-size: 0.7rem; font-weight: 600;
+    padding: 0.15rem 0.5rem; border-radius: 9999px;
+    background: var(--accent); color: #fff;
+  }
+
+  .task-list { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 2rem; }
+  .task-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 0.75rem;
+    padding: 1rem 1.25rem;
+  }
+  .task-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; }
+  .task-id { font-size: 0.75rem; color: var(--text-dim); font-family: monospace; }
+  .task-meta { display: flex; gap: 1rem; font-size: 0.8rem; color: var(--text-dim); margin-bottom: 0.5rem; flex-wrap: wrap; }
+  .task-meta span { display: flex; align-items: center; gap: 0.25rem; }
+
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  }
+  .status-dot.receiving { background: var(--yellow); animation: pulse 1.5s infinite; }
+  .status-dot.transcribing { background: var(--blue); animation: pulse 1.5s infinite; }
+  .status-dot.completed { background: var(--green); }
+  .status-dot.failed { background: var(--red); }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+
+  .progress-bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 0.5rem; }
+  .progress-fill { height: 100%; border-radius: 3px; transition: width 0.3s; background: var(--accent); }
+
+  .task-message { font-size: 0.8rem; color: var(--text-dim); margin-top: 0.5rem; }
+  .task-summary {
+    font-size: 0.8rem; color: var(--text-dim);
+    margin-top: 0.5rem; padding: 0.5rem 0.75rem;
+    background: var(--bg); border-radius: 0.5rem;
+    white-space: pre-wrap; word-break: break-all;
+    max-height: 4rem; overflow: hidden;
+  }
+
+  .empty { color: var(--text-dim); font-size: 0.875rem; text-align: center; padding: 2rem 0; }
+
+  .connection-status {
+    position: fixed; top: 1rem; right: 1rem;
+    font-size: 0.75rem; padding: 0.35rem 0.75rem;
+    border-radius: 9999px; display: flex; align-items: center; gap: 0.35rem;
+  }
+  .connection-status.connected { background: #14532d; color: #86efac; }
+  .connection-status.disconnected { background: #7f1d1d; color: #fca5a5; }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>WhisperDesk 推理服务</h1>
+    <p class="subtitle" id="subtitle">正在连接...</p>
+
+    <div class="cards">
+      <div class="card">
+        <div class="card-label">运行时长</div>
+        <div class="card-value" id="uptime">--</div>
+      </div>
+      <div class="card">
+        <div class="card-label">GPU</div>
+        <div class="card-value" id="gpu">--</div>
+      </div>
+      <div class="card">
+        <div class="card-label">活跃任务</div>
+        <div class="card-value blue" id="activeCount">0</div>
+      </div>
+      <div class="card">
+        <div class="card-label">已完成</div>
+        <div class="card-value green" id="completedCount">0</div>
+      </div>
+    </div>
+
+    <div class="section-title">活跃任务</div>
+    <div class="task-list" id="activeTasks">
+      <div class="empty">暂无活跃任务</div>
+    </div>
+
+    <div class="section-title">
+      历史记录
+      <span class="badge" id="historyBadge">0</span>
+    </div>
+    <div class="task-list" id="completedTasks">
+      <div class="empty">暂无历史记录</div>
+    </div>
+  </div>
+
+  <div class="connection-status disconnected" id="connStatus">
+    <span class="status-dot failed"></span>
+    未连接
+  </div>
+
+<script>
+(function() {
+  let activeTasks = {};
+  let completedTasks = [];
+  let uptimeSeconds = 0;
+  let gpuAvailable = false;
+  let gpuMessage = "";
+  let uptimeInterval = null;
+
+  function formatUptime(s) {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return h + "h " + m + "m";
+    if (m > 0) return m + "m " + sec + "s";
+    return sec + "s";
+  }
+
+  function formatBytes(b) {
+    if (b === 0) return "0 B";
+    const units = ["B", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(b) / Math.log(1024));
+    return (b / Math.pow(1024, i)).toFixed(1) + " " + units[i];
+  }
+
+  function formatTime(ts) {
+    if (!ts) return "";
+    const d = new Date(ts);
+    return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  }
+
+  const statusLabels = {
+    receiving: "接收中",
+    transcribing: "转录中",
+    completed: "已完成",
+    failed: "失败",
+  };
+
+  function renderTask(task, showSummary) {
+    const pct = Math.round(task.progress * 100);
+    const showBar = task.status === "transcribing" || task.status === "receiving";
+    return '<div class="task-item" data-id="' + task.id + '">'
+      + '<div class="task-header">'
+      + '  <span class="task-id">' + task.id.slice(0, 8) + '</span>'
+      + '  <span style="display:flex;align-items:center;gap:0.35rem;font-size:0.8rem">'
+      + '    <span class="status-dot ' + task.status + '"></span>'
+      + '    ' + (statusLabels[task.status] || task.status)
+      + (showBar ? " " + pct + "%" : "")
+      + '  </span>'
+      + '</div>'
+      + '<div class="task-meta">'
+      + '  <span>IP: ' + task.clientIp + '</span>'
+      + '  <span>模型: ' + task.modelName + '</span>'
+      + '  <span>文件: ' + formatBytes(task.fileSize) + '</span>'
+      + '  <span>开始: ' + formatTime(task.startedAt) + '</span>'
+      + (task.completedAt ? '  <span>结束: ' + formatTime(task.completedAt) + '</span>' : '')
+      + '</div>'
+      + (showBar ? '<div class="progress-bar"><div class="progress-fill" style="width:' + pct + '%"></div></div>' : '')
+      + '<div class="task-message">' + task.message + '</div>'
+      + (showSummary && task.resultSummary ? '<div class="task-summary">' + escapeHtml(task.resultSummary) + '</div>' : '')
+      + '</div>';
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement("div");
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function render() {
+    const activeArr = Object.values(activeTasks);
+    document.getElementById("activeCount").textContent = activeArr.length;
+    document.getElementById("completedCount").textContent = completedTasks.length;
+    document.getElementById("historyBadge").textContent = completedTasks.length;
+    document.getElementById("uptime").textContent = formatUptime(uptimeSeconds);
+    document.getElementById("gpu").textContent = gpuAvailable ? "可用" : "不可用";
+    document.getElementById("gpu").style.color = gpuAvailable ? "var(--green)" : "var(--text-dim)";
+
+    const activeEl = document.getElementById("activeTasks");
+    if (activeArr.length === 0) {
+      activeEl.innerHTML = '<div class="empty">暂无活跃任务</div>';
+    } else {
+      activeEl.innerHTML = activeArr.map(function(t) { return renderTask(t, false); }).join("");
+    }
+
+    const completedEl = document.getElementById("completedTasks");
+    if (completedTasks.length === 0) {
+      completedEl.innerHTML = '<div class="empty">暂无历史记录</div>';
+    } else {
+      completedEl.innerHTML = completedTasks.map(function(t) { return renderTask(t, true); }).join("");
+    }
+  }
+
+  function handleInit(data) {
+    uptimeSeconds = data.uptimeSeconds || 0;
+    gpuAvailable = data.gpu || false;
+    gpuMessage = data.gpuMessage || "";
+    activeTasks = {};
+    (data.activeTasks || []).forEach(function(t) { activeTasks[t.id] = t; });
+    completedTasks = data.completedTasks || [];
+    document.getElementById("subtitle").textContent =
+      "GPU: " + (gpuAvailable ? "可用" : "不可用") + (gpuMessage ? " — " + gpuMessage : "");
+    render();
+  }
+
+  function handleUpdate(event) {
+    var task = event.task;
+    if (!task) return;
+    if (event.eventType === "task_added" || event.eventType === "task_updated") {
+      activeTasks[task.id] = task;
+    } else if (event.eventType === "task_completed" || event.eventType === "task_failed") {
+      delete activeTasks[task.id];
+      completedTasks.unshift(task);
+      if (completedTasks.length > 50) completedTasks.pop();
+    }
+    render();
+  }
+
+  function connect() {
+    var es = new EventSource("/api/dashboard/events");
+    var statusEl = document.getElementById("connStatus");
+
+    es.addEventListener("init", function(e) {
+      statusEl.className = "connection-status connected";
+      statusEl.innerHTML = '<span class="status-dot completed"></span>已连接';
+      try { handleInit(JSON.parse(e.data)); } catch(err) { console.error(err); }
+    });
+
+    es.addEventListener("update", function(e) {
+      try { handleUpdate(JSON.parse(e.data)); } catch(err) { console.error(err); }
+    });
+
+    es.onerror = function() {
+      statusEl.className = "connection-status disconnected";
+      statusEl.innerHTML = '<span class="status-dot failed"></span>连接断开，重连中...';
+      es.close();
+      setTimeout(connect, 3000);
+    };
+  }
+
+  uptimeInterval = setInterval(function() {
+    uptimeSeconds++;
+    document.getElementById("uptime").textContent = formatUptime(uptimeSeconds);
+  }, 1000);
+
+  connect();
+})();
+</script>
+</body>
+</html>

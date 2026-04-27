@@ -87,7 +87,12 @@ export function TranscriptionPanel() {
             {selectedFile.sampleRate}Hz
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
+          {settings.remoteUrl && (
+            <span className="rounded-md bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+              远程推理
+            </span>
+          )}
           {isTranscribing ? (
             <button
               className="rounded-lg bg-red-500 px-4 py-1.5 text-sm text-white transition-colors hover:bg-red-600"
@@ -176,14 +181,23 @@ export function TranscriptionPanel() {
         {isTranscribing && activeTask && (
           <div>
             <div className="mb-1 flex justify-between text-xs text-text-secondary">
-              <span>转录进度</span>
-              <span>{Math.round(activeTask.progress * 100)}%</span>
+              <span className="flex items-center gap-1.5">
+                <PhaseIndicator phase={activeTask.phase} />
+                {phaseLabel(activeTask.phase, activeTask.currentSegment)}
+              </span>
+              {(activeTask.phase === "local" || activeTask.phase === "remote_transcribing") && (
+                <span>{Math.round(activeTask.progress * 100)}%</span>
+              )}
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-border">
-              <div
-                className="h-full rounded-full bg-primary transition-all"
-                style={{ width: `${activeTask.progress * 100}%` }}
-              />
+              {activeTask.phase === "remote_connecting" || activeTask.phase === "remote_uploading" ? (
+                <div className="h-full w-full animate-pulse rounded-full bg-blue-400/60" />
+              ) : (
+                <div
+                  className="h-full rounded-full bg-primary transition-all"
+                  style={{ width: `${activeTask.progress * 100}%` }}
+                />
+              )}
             </div>
           </div>
         )}
@@ -318,4 +332,41 @@ function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+function phaseLabel(
+  phase?: string,
+  currentSegment?: string,
+): string {
+  switch (phase) {
+    case "remote_connecting":
+      return "正在连接远程服务器...";
+    case "remote_uploading":
+      return currentSegment || "正在上传音频文件...";
+    case "remote_transcribing":
+      return currentSegment || "远程转录中...";
+    case "complete":
+      return "转录完成";
+    case "local":
+      return currentSegment || "本地转录中...";
+    default:
+      return currentSegment || "转录进度";
+  }
+}
+
+function PhaseIndicator({ phase }: { phase?: string }) {
+  const isRemote = phase?.startsWith("remote_");
+  if (!phase) return null;
+
+  return (
+    <span
+      className={`inline-block h-2 w-2 rounded-full ${
+        phase === "complete"
+          ? "bg-green-500"
+          : isRemote
+            ? "animate-pulse bg-blue-500"
+            : "animate-pulse bg-primary"
+      }`}
+    />
+  );
 }

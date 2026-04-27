@@ -53,6 +53,8 @@ export interface TranscriptionProgress {
   audioFileId: string;
   progress: number;
   currentSegment?: string;
+  /** 当前阶段 */
+  phase?: "local" | "remote_connecting" | "remote_uploading" | "remote_transcribing" | "complete";
 }
 
 /** Whisper 引擎日志条目 */
@@ -115,4 +117,27 @@ export interface ServerStatus {
 export interface CudaInfo {
   available: boolean;
   message: string;
+}
+
+/** Dashboard 任务信息 */
+export interface DashboardTaskInfo {
+  id: string;
+  clientIp: string;
+  fileSize: number;
+  modelName: string;
+  status: "receiving" | "transcribing" | "completed" | "failed";
+  progress: number;
+  message: string;
+  startedAt: string;
+  completedAt?: string;
+  resultSummary?: string;
+}
+
+/** Dashboard 快照 */
+export interface DashboardSnapshot {
+  uptimeSeconds: number;
+  gpu: boolean;
+  gpuMessage: string;
+  activeTasks: DashboardTaskInfo[];
+  completedTasks: DashboardTaskInfo[];
 }

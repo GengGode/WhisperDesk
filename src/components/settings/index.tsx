@@ -2,6 +2,7 @@ import { useSettingsStore } from "@/stores/settings-store";
 import {
   deleteModel,
   ensureModel,
+  getDashboardStatus,
   getInferenceServerStatus,
   listModels,
   openModelsDir,
@@ -11,7 +12,7 @@ import {
 } from "@/lib/tauri";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranscriptionStore } from "@/stores/transcription-store";
-import type { ServerStatus, WhisperModel } from "@/lib/types";
+import type { DashboardSnapshot, ServerStatus, WhisperModel } from "@/lib/types";
 
 const MODEL_NAMES = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"] as const;
 
@@ -50,6 +51,23 @@ export function SettingsPanel() {
 
   const [remoteTestResult, setRemoteTestResult] = useState<string | null>(null);
   const [remoteTesting, setRemoteTesting] = useState(false);
+
+  const [dashboard, setDashboard] = useState<DashboardSnapshot | null>(null);
+  const dashPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  useEffect(() => {
+    if (!serverStatus.running) {
+      setDashboard(null);
+      clearInterval(dashPollRef.current);
+      return;
+    }
+    const poll = async () => {
+      try { setDashboard(await getDashboardStatus()); } catch { /* ignore */ }
+    };
+    poll();
+    dashPollRef.current = setInterval(poll, 2000);
+    return () => clearInterval(dashPollRef.current);
+  }, [serverStatus.running]);
 
   const refreshModels = useCallback(async () => {
     try {
@@ -250,7 +268,74 @@ export function SettingsPanel() {
             <p className="text-xs text-text-secondary">
               开启后其他 WhisperDesk 可通过 <code>http://本机IP:{settings.inferenceServerPort}</code> 调用本机推理
             </p>
+
+            {serverStatus.running && (
+              <p className="text-xs text-text-secondary">
+                浏览器打开{" "}
+                <a
+                  className="text-primary underline"
+                  href={`http://localhost:${serverStatus.port}`}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  http://localhost:{serverStatus.port}
+                </a>
+                {" "}查看完整 Dashboard
+              </p>
+            )}
           </div>
+
+          {serverStatus.running && dashboard && (
+            <div className="rounded-lg border border-border p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">服务状态</span>
+                <span className="text-xs text-text-secondary">
+                  GPU: {dashboard.gpu ? "可用" : "不可用"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-md border border-border p-2.5 text-center">
+                  <div className="text-lg font-bold text-blue-500">{dashboard.activeTasks.length}</div>
+                  <div className="text-[10px] text-text-secondary">活跃任务</div>
+                </div>
+                <div className="rounded-md border border-border p-2.5 text-center">
+                  <div className="text-lg font-bold text-green-500">{dashboard.completedTasks.length}</div>
+                  <div className="text-[10px] text-text-secondary">已完成</div>
+                </div>
+              </div>
+
+              {dashboard.activeTasks.length > 0 && (
+                <div className="space-y-2">
+                  {dashboard.activeTasks.map((t) => (
+                    <div key={t.id} className="rounded-md border border-border bg-surface p-2.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`inline-block h-2 w-2 rounded-full ${
+                            t.status === "receiving" ? "animate-pulse bg-yellow-500"
+                              : "animate-pulse bg-blue-500"
+                          }`} />
+                          {t.status === "receiving" ? "接收中" : "转录中"}
+                        </span>
+                        <span className="text-text-secondary">
+                          {t.clientIp} · {t.modelName}
+                        </span>
+                      </div>
+                      {t.status === "transcribing" && (
+                        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-border">
+                          <div
+                            className="h-full rounded-full bg-blue-500 transition-all"
+                            style={{ width: `${t.progress * 100}%` }}
+                          />
+                        </div>
+                      )}
+                      <div className="mt-1 text-text-secondary">{t.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* 远程推理（使用其他设备的推理服务） */}

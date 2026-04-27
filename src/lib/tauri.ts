@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import type {
   AudioFile,
   CudaInfo,
+  DashboardSnapshot,
   ExportFormat,
   ExportRequest,
   ServerStatus,
@@ -153,4 +154,9 @@ export async function testRemoteConnection(
 /** 检测本机 CUDA 是否可用 */
 export async function checkCuda(): Promise<CudaInfo> {
   return invoke<CudaInfo>("check_cuda");
+}
+
+/** 获取推理服务 Dashboard 快照 */
+export async function getDashboardStatus(): Promise<DashboardSnapshot> {
+  return invoke<DashboardSnapshot>("get_dashboard_status");
 }

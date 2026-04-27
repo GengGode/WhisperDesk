@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::server::{InferenceServerState, ServerStatus};
+use crate::server::{DashboardSnapshot, InferenceServerState, ServerStatus};
 
 #[tauri::command]
 pub async fn start_inference_server(
@@ -22,4 +22,11 @@ pub fn get_inference_server_status(
     state: State<'_, InferenceServerState>,
 ) -> ServerStatus {
     state.status()
+}
+
+#[tauri::command]
+pub fn get_dashboard_status(
+    state: State<'_, InferenceServerState>,
+) -> DashboardSnapshot {
+    state.dashboard_snapshot()
 }

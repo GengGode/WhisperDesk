@@ -1,8 +1,13 @@
 use std::convert::Infallible;
+use std::net::SocketAddr;
+use std::sync::Arc;
 
 use axum::{
-    extract::{DefaultBodyLimit, Multipart},
-    response::sse::{Event, Sse},
+    extract::{ConnectInfo, DefaultBodyLimit, Multipart, State},
+    response::{
+        sse::{Event, Sse},
+        Html,
+    },
     routing::{get, post},
     Json, Router,
 };
@@ -12,13 +17,19 @@ use tower_http::cors::CorsLayer;
 use crate::models::audio::TranscriptionRequest;
 use crate::services::transcriber::TranscriberService;
 
-pub fn create_router() -> Router {
+use super::dashboard::DashboardState;
+
+pub fn create_router(dashboard: Arc<DashboardState>) -> Router {
     Router::new()
+        .route("/", get(dashboard_page))
         .route("/api/health", get(health))
         .route("/api/models", get(models))
         .route("/api/transcribe", post(transcribe))
+        .route("/api/dashboard", get(dashboard_api))
+        .route("/api/dashboard/events", get(dashboard_events))
         .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
         .layer(CorsLayer::permissive())
+        .with_state(dashboard)
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -38,8 +49,57 @@ async fn models() -> Result<Json<Vec<crate::services::transcriber::ModelInfo>>, 
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
 
+// ─── Dashboard API ────────────────────────────────────────────────
+
+async fn dashboard_api(
+    State(dash): State<Arc<DashboardState>>,
+) -> Json<super::dashboard::DashboardSnapshot> {
+    Json(dash.snapshot())
+}
+
+async fn dashboard_events(
+    State(dash): State<Arc<DashboardState>>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+    let mut rx = dash.subscribe();
+    let (tx, stream_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
+
+    let snapshot = dash.snapshot();
+    let init_data = serde_json::to_string(&snapshot).unwrap_or_default();
+    let tx_init = tx.clone();
+    tokio::spawn(async move {
+        let _ = tx_init
+            .send(Ok(Event::default().event("init").data(init_data)))
+            .await;
+    });
+
+    tokio::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(event) => {
+                    let data = serde_json::to_string(&event).unwrap_or_default();
+                    if tx.send(Ok(Event::default().event("update").data(data))).await.is_err() {
+                        break;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => break,
+            }
+        }
+    });
+
+    Sse::new(ReceiverStream::new(stream_rx))
+}
+
+async fn dashboard_page() -> Html<&'static str> {
+    Html(include_str!("dashboard.html"))
+}
+
+// ─── Transcribe ───────────────────────────────────────────────────
+
 /// POST /api/transcribe — multipart 接收音频 + 参数，SSE 流式返回进度和结果
 async fn transcribe(
+    State(dash): State<Arc<DashboardState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     mut multipart: Multipart,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, (axum::http::StatusCode, String)> {
     let mut audio_bytes: Option<Vec<u8>> = None;
@@ -76,6 +136,12 @@ async fn transcribe(
     let audio_bytes = audio_bytes
         .ok_or_else(|| (axum::http::StatusCode::BAD_REQUEST, "缺少音频文件 (field name: file)".to_string()))?;
 
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let client_ip = addr.ip().to_string();
+    let file_size = audio_bytes.len() as u64;
+
+    dash.register_task(&task_id, &client_ip, file_size, &model_name);
+
     let tmp_dir = std::env::temp_dir().join("whisperdesk_server");
     std::fs::create_dir_all(&tmp_dir)
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("创建临时目录失败: {e}")))?;
@@ -85,7 +151,7 @@ async fn transcribe(
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("写入临时文件失败: {e}")))?;
 
     let request = TranscriptionRequest {
-        audio_file_id: uuid::Uuid::new_v4().to_string(),
+        audio_file_id: task_id.clone(),
         audio_path: tmp_path.to_string_lossy().to_string(),
         model_name,
         language,
@@ -96,18 +162,26 @@ async fn transcribe(
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
 
+    let dash_spawn = dash.clone();
+    let task_id_spawn = task_id.clone();
     tokio::spawn(async move {
         let transcriber = match TranscriberService::portable() {
             Ok(t) => t,
             Err(e) => {
+                dash_spawn.fail_task(&task_id_spawn, &e.to_string());
                 let _ = tx.send(Ok(Event::default().event("error").data(e.to_string()))).await;
                 let _ = std::fs::remove_file(&tmp_path);
                 return;
             }
         };
 
+        dash_spawn.set_transcribing(&task_id_spawn);
+
         let ptx = tx.clone();
+        let dash_p = dash_spawn.clone();
+        let tid_p = task_id_spawn.clone();
         let on_progress = move |progress: f32, msg: &str| {
+            dash_p.update_progress(&tid_p, progress, msg);
             let d = serde_json::json!({ "progress": progress, "message": msg });
             let _ = ptx.try_send(Ok(Event::default().event("progress").data(d.to_string())));
         };
@@ -127,10 +201,13 @@ async fn transcribe(
         let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
         match transcriber.transcribe(on_progress, on_model_dl, on_log, abort_flag, &request).await {
             Ok(result) => {
+                let summary = Some(truncate_chars(&result.text, 200));
+                dash_spawn.complete_task(&task_id_spawn, summary);
                 let json = serde_json::to_string(&result).unwrap_or_default();
                 let _ = tx.send(Ok(Event::default().event("complete").data(json))).await;
             }
             Err(e) => {
+                dash_spawn.fail_task(&task_id_spawn, &e.to_string());
                 let _ = tx.send(Ok(Event::default().event("error").data(e.to_string()))).await;
             }
         }
@@ -139,4 +216,15 @@ async fn transcribe(
     });
 
     Ok(Sse::new(ReceiverStream::new(rx)))
+}
+
+/// 按字符数安全截断 UTF-8 字符串，避免切到多字节字符中间
+fn truncate_chars(s: &str, max_chars: usize) -> String {
+    let mut chars = s.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}...")
+    } else {
+        truncated
+    }
 }

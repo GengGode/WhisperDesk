@@ -63,6 +63,8 @@ pub struct TranscriptionProgressPayload {
     /// 0.0 - 1.0
     pub progress: f32,
     pub current_segment: Option<String>,
+    /// 当前阶段：local / remote_connecting / remote_uploading / remote_transcribing / complete
+    pub phase: Option<String>,
 }
 
 /// Whisper 引擎日志事件（转发到前端界面展示）
