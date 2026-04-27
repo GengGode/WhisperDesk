@@ -177,6 +177,10 @@ async fn transcribe_via_remote(
     let url = format!("{}/api/transcribe", remote_url.trim_end_matches('/'));
     let client = Client::builder()
         .user_agent("WhisperDesk/0.1")
+        .no_gzip()
+        .no_brotli()
+        .no_deflate()
+        .no_proxy()
         .build()
         .map_err(|e| AppError::Transcription(format!("创建 HTTP 客户端失败: {e}")))?;
 
@@ -195,6 +199,13 @@ async fn transcribe_via_remote(
         )));
     }
 
+    let log = make_log_cb(window);
+
+    log(&format!("[远程] HTTP 状态: {}, Content-Type: {:?}",
+        resp.status(),
+        resp.headers().get("content-type"),
+    ));
+
     emit_progress(
         window,
         &request.audio_file_id,
@@ -208,6 +219,40 @@ async fn transcribe_via_remote(
     let mut current_event = String::new();
     let mut data_buf = String::new();
     let mut line_buf = String::new();
+    let mut chunk_count: u64 = 0;
+
+    // 处理一条完整 SSE 事件
+    let dispatch_event = |event: &str, data: &str,
+                          result: &mut Option<TranscriptionResult>|
+     -> Result<(), AppError> {
+        log(&format!("[远程] 派发事件 '{event}', data {len} bytes", len = data.len()));
+        match event {
+            "progress" => {
+                if let Ok(v) = serde_json::from_str::<serde_json::Value>(data) {
+                    let p = v["progress"].as_f64().unwrap_or(0.0) as f32;
+                    let msg = v["message"].as_str().unwrap_or("");
+                    on_progress(p, msg);
+                }
+            }
+            "complete" => {
+                emit_progress(window, &request.audio_file_id, 1.0, "远程转录完成", "complete");
+                let r: TranscriptionResult = serde_json::from_str(data)
+                    .map_err(|e| {
+                        log(&format!("[远程] 解析 complete 失败: {e}, 前 500 字符: {:?}",
+                            if data.len() > 500 { &data[..500] } else { data }));
+                        AppError::Transcription(format!("解析远程结果失败: {e}"))
+                    })?;
+                log(&format!("[远程] 解析成功，文本 {} chars, {} 个分段",
+                    r.text.len(), r.segments.len()));
+                *result = Some(r);
+            }
+            "error" => {
+                return Err(AppError::Transcription(format!("远程推理错误: {data}")));
+            }
+            _ => {}
+        }
+        Ok(())
+    };
 
     let mut stream = resp;
     while let Some(chunk) = stream
@@ -215,7 +260,10 @@ async fn transcribe_via_remote(
         .await
         .map_err(|e| AppError::Transcription(format!("读取远程响应失败: {e}")))?
     {
+        chunk_count += 1;
         let text = String::from_utf8_lossy(&chunk);
+        log(&format!("[远程] chunk #{chunk_count} ({} B), line_buf {} B",
+            chunk.len(), line_buf.len() + text.len()));
         line_buf.push_str(&text);
 
         while let Some(pos) = line_buf.find('\n') {
@@ -225,38 +273,47 @@ async fn transcribe_via_remote(
             if let Some(ev) = line.strip_prefix("event: ") {
                 current_event = ev.trim().to_string();
             } else if let Some(d) = line.strip_prefix("data: ") {
-                data_buf = d.to_string();
-            } else if line.is_empty() && !current_event.is_empty() {
-                match current_event.as_str() {
-                    "progress" => {
-                        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&data_buf) {
-                            let p = v["progress"].as_f64().unwrap_or(0.0) as f32;
-                            let msg = v["message"].as_str().unwrap_or("");
-                            on_progress(p, msg);
-                        }
-                    }
-                    "complete" => {
-                        emit_progress(
-                            window,
-                            &request.audio_file_id,
-                            1.0,
-                            "远程转录完成",
-                            "complete",
-                        );
-                        let r: TranscriptionResult = serde_json::from_str(&data_buf)
-                            .map_err(|e| AppError::Transcription(format!("解析远程结果失败: {e}")))?;
-                        result = Some(r);
-                    }
-                    "error" => {
-                        return Err(AppError::Transcription(format!("远程推理错误: {data_buf}")));
-                    }
-                    _ => {}
+                // SSE 规范：多个 data 行用 \n 拼接
+                if data_buf.is_empty() {
+                    data_buf = d.to_string();
+                } else {
+                    data_buf.push('\n');
+                    data_buf.push_str(d);
                 }
+            } else if line.is_empty() && !current_event.is_empty() {
+                dispatch_event(&current_event, &data_buf, &mut result)?;
                 current_event.clear();
                 data_buf.clear();
+                if result.is_some() {
+                    log("[远程] 已获得结果，结束 SSE 读取");
+                    break;
+                }
             }
         }
+        if result.is_some() {
+            break;
+        }
     }
+
+    // 流结束后处理 line_buf 中残留的未以 \n 结尾的数据
+    if result.is_none() && !line_buf.is_empty() {
+        log(&format!("[远程] 流结束，残留 {} bytes，尝试补全解析", line_buf.len()));
+        let remaining = line_buf.trim().to_string();
+        if let Some(d) = remaining.strip_prefix("data: ") {
+            if data_buf.is_empty() {
+                data_buf = d.to_string();
+            } else {
+                data_buf.push('\n');
+                data_buf.push_str(d);
+            }
+        }
+        if !current_event.is_empty() && !data_buf.is_empty() {
+            dispatch_event(&current_event, &data_buf, &mut result)?;
+        }
+    }
+
+    log(&format!("[远程] SSE 流结束，共 {chunk_count} 个 chunk，结果: {}",
+        if result.is_some() { "有" } else { "无" }));
 
     result.ok_or_else(|| AppError::Transcription("远程服务器未返回转录结果".to_string()))
 }
