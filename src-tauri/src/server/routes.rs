@@ -21,8 +21,12 @@ pub fn create_router() -> Router {
 }
 
 async fn health() -> Json<serde_json::Value> {
-    let gpu = cfg!(feature = "whisper-rs-backend");
-    Json(serde_json::json!({ "status": "ok", "gpu": gpu }))
+    let cuda_info = crate::services::cuda::get_cuda_info();
+    Json(serde_json::json!({
+        "status": "ok",
+        "gpu": cuda_info.available,
+        "cudaMessage": cuda_info.message,
+    }))
 }
 
 async fn models() -> Result<Json<Vec<crate::services::transcriber::ModelInfo>>, (axum::http::StatusCode, String)> {

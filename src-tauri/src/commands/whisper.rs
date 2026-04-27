@@ -9,6 +9,7 @@ use crate::models::audio::{
     TranscriptionResult, UpdateTranscriptionRequest,
 };
 use crate::models::error::AppError;
+use crate::services::cuda::CudaInfo;
 use crate::services::file_index::FileIndexService;
 use crate::services::paths;
 use crate::services::transcriber::{ModelInfo, TranscriberService};
@@ -299,4 +300,9 @@ pub fn delete_model(model_name: String) -> Result<(), AppError> {
         std::fs::remove_file(&path)?;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn check_cuda() -> CudaInfo {
+    crate::services::cuda::get_cuda_info().clone()
 }

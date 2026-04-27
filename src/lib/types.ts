@@ -104,3 +104,9 @@ export interface ServerStatus {
   running: boolean;
   port: number;
 }
+
+/** CUDA 运行时检测结果 */
+export interface CudaInfo {
+  available: boolean;
+  message: string;
+}

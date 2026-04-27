@@ -6,8 +6,9 @@ authors = ["YuSuiXian"]
 edition = "2021"
 
 [features]
-default = ["whisper-rs-backend"]
+default = ["whisper-rs-backend", "cuda"]
 whisper-rs-backend = ["dep:whisper-rs"]
+cuda = ["whisper-rs-backend", "whisper-rs/cuda"]
 
 [lib]
 name = "whisper_desk_lib"
@@ -15,6 +16,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["protocol-asset"] }
@@ -28,7 +30,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 walkdir = "2"
 rusqlite = { version = "0.37", features = ["bundled"] }
-whisper-rs = { version = "0.16", optional = true, features = ["cuda"] }
+whisper-rs = { version = "0.16", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "multipart"] }
 symphonia = { version = "0.5", features = ["mp3", "aac", "flac", "vorbis", "isomp4", "ogg", "wav"] }
 axum = { version = "0.8", features = ["multipart"] }

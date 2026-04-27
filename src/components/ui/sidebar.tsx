@@ -6,6 +6,8 @@ interface SidebarProps {
 
 export function Sidebar({ children }: SidebarProps) {
   const useGpu = useSettingsStore((s) => s.settings.useGpu);
+  const cudaAvailable = useSettingsStore((s) => s.cudaAvailable);
+  const cudaMessage = useSettingsStore((s) => s.cudaMessage);
   const setSettings = useSettingsStore((s) => s.setSettings);
 
   return (
@@ -15,18 +17,36 @@ export function Sidebar({ children }: SidebarProps) {
       </div>
       <nav className="flex-1 overflow-y-auto p-2">{children}</nav>
       <div className="border-t border-border px-4 py-3">
-        <GpuToggle checked={useGpu} onChange={(v) => setSettings({ useGpu: v })} />
+        <GpuToggle
+          checked={useGpu}
+          disabled={!cudaAvailable}
+          tooltip={cudaAvailable ? cudaMessage : `${cudaMessage}（仅支持 CPU）`}
+          onChange={(v) => setSettings({ useGpu: v })}
+        />
       </div>
     </aside>
   );
 }
 
-function GpuToggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+function GpuToggle({
+  checked,
+  disabled,
+  tooltip,
+  onChange,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  tooltip: string;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <button
       type="button"
-      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 transition-colors hover:bg-white/60"
-      onClick={() => onChange(!checked)}
+      className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 transition-colors ${
+        disabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/60"
+      }`}
+      onClick={() => !disabled && onChange(!checked)}
+      title={tooltip}
     >
       <div className="flex items-center gap-2">
         <svg
@@ -43,17 +63,17 @@ function GpuToggle({ checked, onChange }: { checked: boolean; onChange: (v: bool
           />
         </svg>
         <span className="text-xs font-medium text-text-secondary">
-          {checked ? "CUDA" : "CPU"}
+          {disabled ? "CPU（无 CUDA）" : checked ? "CUDA" : "CPU"}
         </span>
       </div>
       <span
-        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ${
-          checked ? "bg-primary" : "bg-border"
-        }`}
+        className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
+          disabled ? "bg-border" : checked ? "bg-primary" : "bg-border"
+        } ${disabled ? "" : "cursor-pointer"}`}
       >
         <span
           className={`pointer-events-none inline-block h-4 w-4 translate-y-0.5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${
-            checked ? "translate-x-[18px]" : "translate-x-0.5"
+            checked && !disabled ? "translate-x-[18px]" : "translate-x-0.5"
           }`}
         />
       </span>

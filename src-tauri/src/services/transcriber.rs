@@ -198,10 +198,16 @@ impl TranscriberService {
 
         on_progress(0.05, "音频解码完成");
 
-        let use_gpu = request.use_gpu.unwrap_or(true);
+        let requested_gpu = request.use_gpu.unwrap_or(true);
+        let cuda_ok = super::cuda::is_cuda_available();
+        let use_gpu = requested_gpu && cuda_ok;
+        if requested_gpu && !cuda_ok {
+            println!("[推理] 用户请求 GPU 但 CUDA 不可用，自动回退 CPU");
+            on_progress(0.03, "CUDA 不可用，使用 CPU 推理");
+        }
         let mut ctx_params = WhisperContextParameters::default();
         ctx_params.use_gpu = use_gpu;
-        println!("[推理] use_gpu = {use_gpu}");
+        println!("[推理] use_gpu = {use_gpu} (requested={requested_gpu}, cuda_available={cuda_ok})");
 
         let ctx = WhisperContext::new_with_params(
             model_path

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   AudioFile,
+  CudaInfo,
   ExportFormat,
   ExportRequest,
   ServerStatus,
@@ -135,4 +136,9 @@ export async function testRemoteConnection(
   const resp = await fetch(`${url.replace(/\/$/, "")}/api/health`);
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
+}
+
+/** 检测本机 CUDA 是否可用 */
+export async function checkCuda(): Promise<CudaInfo> {
+  return invoke<CudaInfo>("check_cuda");
 }

@@ -11,6 +11,7 @@ import {
   listenTranscriptionProgress,
 } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 
 type Page = "files" | "transcription" | "editor" | "settings";
@@ -20,8 +21,12 @@ function App() {
   const setFiles = useAudioStore((s) => s.setFiles);
   const setActiveTask = useTranscriptionStore((s) => s.setActiveTask);
   const setModelDownload = useTranscriptionStore((s) => s.setModelDownload);
+  const initCuda = useSettingsStore((s) => s.initCuda);
 
   useEffect(() => {
+    console.log("[App] 初始化：检测 CUDA");
+    void initCuda();
+
     console.log("[App] 初始化：加载音频列表");
     void listAudioFiles()
       .then((files) => {
@@ -43,7 +48,7 @@ function App() {
       void unlistenProgress.then((off) => off());
       void unlistenModel.then((off) => off());
     };
-  }, [setActiveTask, setFiles, setModelDownload]);
+  }, [initCuda, setActiveTask, setFiles, setModelDownload]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">
