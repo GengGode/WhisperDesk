@@ -1,0 +1,97 @@
+---
+description: WhisperDesk 项目架构规范
+alwaysApply: true
+---
+
+# 项目概述
+
+WhisperDesk 是一个基于 **Tauri v2** 的桌面语音转录应用，集成 whisper.cpp 实现本地语音识别，并提供音频文件管理功能。
+
+# 技术栈
+
+| 层面       | 技术                          |
+| ---------- | ----------------------------- |
+| 桌面框架   | Tauri v2                      |
+| 前端框架   | React 19 + TypeScript         |
+| 样式方案   | TailwindCSS v4                |
+| 状态管理   | Zustand                       |
+| 后端语言   | Rust（Tauri 后端）            |
+| 语音识别   | whisper.cpp（通过 whisper-rs）|
+| 音频处理   | Rust symphonia / rodio        |
+| 本地存储   | SQLite（tauri-plugin-sql）    |
+| 包管理     | pnpm                          |
+
+# 项目结构
+
+```
+WhisperDesk/
+├── src/                        # 前端源码（React）
+│   ├── components/             # UI 组件
+│   │   ├── audio-player/       # 音频播放器组件
+│   │   ├── file-manager/       # 文件管理组件
+│   │   ├── transcription/      # 转录相关组件
+│   │   └── ui/                 # 通用基础组件
+│   ├── hooks/                  # 自定义 React Hooks
+│   ├── stores/                 # Zustand 状态 store
+│   ├── lib/                    # 工具函数与类型定义
+│   ├── pages/                  # 页面级组件
+│   ├── App.tsx                 # 应用根组件
+│   └── main.tsx                # 入口文件
+├── src-tauri/                  # Tauri Rust 后端
+│   ├── src/
+│   │   ├── main.rs             # 入口
+│   │   ├── lib.rs              # Tauri 命令注册
+│   │   ├── commands/           # Tauri Command 处理函数
+│   │   │   ├── whisper.rs      # Whisper 转录命令
+│   │   │   ├── audio.rs        # 音频处理命令
+│   │   │   └── files.rs        # 文件管理命令
+│   │   ├── services/           # 业务逻辑层
+│   │   │   ├── transcriber.rs  # 转录引擎封装
+│   │   │   ├── audio.rs        # 音频解码与格式转换
+│   │   │   └── file_index.rs   # 文件索引与元数据
+│   │   └── models/             # 数据结构定义
+│   ├── Cargo.toml
+│   └── tauri.conf.json
+├── package.json
+├── pnpm-lock.yaml
+├── tsconfig.json
+├── vite.config.ts
+└── tailwind.config.ts
+```
+
+# 架构原则
+
+## 前后端职责划分
+
+- **前端（React）**：仅负责 UI 渲染、用户交互和状态展示
+- **后端（Rust）**：负责所有计算密集型任务——Whisper 推理、音频解码、文件系统操作、数据库读写
+- 前后端通过 **Tauri Commands**（`invoke`）通信，禁止前端直接操作文件系统或执行重计算
+
+## 前端规范
+
+- 组件目录使用 **kebab-case** 命名（如 `audio-player/`）
+- 每个组件目录包含 `index.tsx`（组件）和可选的 `types.ts`（类型）
+- 使用 Zustand 管理全局状态，组件局部状态用 `useState`/`useReducer`
+- 与 Tauri 后端通信统一封装在 `src/lib/tauri.ts` 中，组件不直接调用 `invoke`
+- 使用 `@` 路径别名指向 `src/` 目录
+
+## 后端规范
+
+- Tauri Commands 放在 `commands/` 模块，保持薄层，仅做参数校验和调用 service
+- 业务逻辑放在 `services/` 模块，保持可测试性
+- 长耗时操作（转录、批量处理）必须异步执行，通过 Tauri Events 向前端推送进度
+- 错误处理使用 `thiserror` 定义统一错误类型，转为前端可读的错误信息
+
+## Whisper 集成策略
+
+- 优先使用 **whisper-rs**（whisper.cpp 的 Rust 绑定）直接集成
+- 模型文件存放在应用数据目录（`app_data_dir`），支持用户选择不同规格模型
+- 转录任务在独立线程运行，通过 channel 向主线程报告进度
+- 如果 whisper-rs 集成遇到编译问题，退回 **sidecar** 方案（打包 whisper.cpp CLI）
+
+## 音频文件管理
+
+- 使用 SQLite 存储文件索引（路径、时长、格式、转录状态、创建时间等元数据）
+- 支持导入文件夹，递归扫描常见音频格式（wav, mp3, flac, ogg, m4a）
+- 文件元数据（时长、采样率、声道数）由 Rust 端使用 symphonia 解析
+- 转录结果与音频文件关联存储，支持全文搜索

@@ -1,0 +1,2 @@
+[env]
+LIBCLANG_PATH = { value = "../.env/llvm/bin", relative = true }

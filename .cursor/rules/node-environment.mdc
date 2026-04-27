@@ -1,0 +1,26 @@
+---
+description: Node.js 环境管理规范
+alwaysApply: true
+---
+
+# Node.js 环境
+
+- 使用 **fnm** 管理 Node.js 版本，禁止依赖全局安装的 Node
+- 项目 Node 版本由根目录 `.node-version` 文件指定
+- 执行任何 Node/npm 命令前，先确认版本正确（`fnm use` 或 `fnm current`）
+- 不要在命令中硬编码 Node 版本号，始终以 `.node-version` 为准
+- 如需安装新版本，使用 `fnm install <version>` 而非手动下载
+
+# fnm 初始化
+
+- 每次新终端会话开始时，必须先执行 fnm 环境初始化：
+  ```powershell
+  fnm env --use-on-cd --shell power-shell | Out-String | Invoke-Expression
+  ```
+- 初始化后再执行 `fnm use` 切换到项目指定版本
+
+# 包管理器
+
+- 使用 **pnpm** 作为包管理器，通过 **corepack** 启用：`corepack enable pnpm`
+- pnpm 的包缓存（store）已通过 `.npmrc` 配置到项目目录下的 `.pnpm-store/`，**禁止**修改此配置
+- `.pnpm-store/` 目录必须加入 `.gitignore`，不得提交到版本控制
