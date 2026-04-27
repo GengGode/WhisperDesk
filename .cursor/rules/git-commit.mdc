@@ -1,0 +1,42 @@
+---
+description: Git 提交信息规范
+alwaysApply: true
+---
+
+# Git 提交信息规范
+
+- 提交信息使用**中文**书写
+- 采用 **Conventional Commits** 格式：`<type>: <描述>`
+
+## Type 列表
+
+| Type | 用途 |
+| ---- | ---- |
+| feat | 新功能 |
+| fix | 修复 Bug |
+| refactor | 重构（不涉及功能变更或 Bug 修复） |
+| style | 代码格式调整（空格、缩进、分号等） |
+| docs | 文档变更 |
+| test | 测试相关 |
+| chore | 构建流程、依赖管理等杂项 |
+| perf | 性能优化 |
+
+## 示例
+
+```
+feat: 实现音频文件批量导入功能
+fix: 修复转录进度条不更新的问题
+refactor: 重构文件索引服务，拆分扫描与元数据解析逻辑
+chore: 升级 whisper-rs 依赖到最新版本
+```
+
+## 多行提交信息
+
+如需补充说明，空一行后用中文写正文：
+
+```
+feat: 支持 M4A 格式音频文件
+
+使用 symphonia 解码器新增对 M4A/AAC 格式的支持，
+同时更新了文件过滤逻辑以识别 .m4a 扩展名。
+```
