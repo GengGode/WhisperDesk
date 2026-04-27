@@ -1,4 +1,6 @@
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use reqwest::Client;
 use tokio::io::AsyncWriteExt;
@@ -186,11 +188,13 @@ impl TranscriberService {
     /// - `on_progress(progress_0_to_1, message)` 推理进度回调
     /// - `on_model_progress(model_name, progress_0_to_1)` 模型下载进度回调
     /// - `on_log(message)` 日志回调，转发到前端界面
+    /// - `abort_flag` 为 true 时中止推理
     pub async fn transcribe<P, M, L>(
         &self,
         on_progress: P,
         on_model_progress: M,
         on_log: L,
+        abort_flag: Arc<AtomicBool>,
         request: &TranscriptionRequest,
     ) -> Result<TranscriptionResult, AppError>
     where
@@ -201,8 +205,7 @@ impl TranscriberService {
         #[cfg(not(feature = "whisper-rs-backend"))]
         {
             on_progress(1.0, "未启用 whisper-rs-backend 功能");
-            let _ = on_model_progress;
-            let _ = on_log;
+            let _ = (on_model_progress, on_log, abort_flag);
             return Err(AppError::Transcription(
                 "当前构建未启用 whisper-rs-backend。若需真实推理，请安装 LLVM/Clang 并使用 `cargo check --features whisper-rs-backend` 构建。".to_string(),
             ));
@@ -227,96 +230,137 @@ impl TranscriberService {
             on_log("[推理] 用户请求 GPU 但 CUDA 不可用，自动回退 CPU");
             on_progress(0.03, "CUDA 不可用，使用 CPU 推理");
         }
-        let mut ctx_params = WhisperContextParameters::default();
-        ctx_params.use_gpu = use_gpu;
         on_log(&format!(
             "[推理] use_gpu = {use_gpu} (requested={requested_gpu}, cuda_available={cuda_ok})"
         ));
 
-        on_log("[推理] 加载模型...");
-        let ctx = WhisperContext::new_with_params(
-            model_path
-                .to_str()
-                .ok_or_else(|| AppError::Transcription("模型路径非法".to_string()))?,
-            ctx_params,
-        )
-        .map_err(|e| AppError::Transcription(format!("加载模型失败: {e}")))?;
-        on_log("[推理] 模型加载完成");
+        let model_path_str = model_path
+            .to_str()
+            .ok_or_else(|| AppError::Transcription("模型路径非法".to_string()))?
+            .to_string();
+        let samples = decoded.samples_16k_mono;
+        let n_threads = request.threads.unwrap_or(4) as i32;
+        let language = request.language.clone();
+        let audio_file_id = request.audio_file_id.clone();
+        let model_name = request.model_name.clone();
+        let req_language = request.language.clone();
+        let duration = decoded.duration_seconds;
 
-        let mut state = ctx
-            .create_state()
-            .map_err(|e| AppError::Transcription(format!("创建推理状态失败: {e}")))?;
-
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_n_threads(request.threads.unwrap_or(4) as i32);
-        if let Some(language) = request.language.as_deref() {
-            if language != "auto" {
-                params.set_language(Some(language));
-            }
-        }
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_special(false);
-        params.set_print_timestamps(false);
-
-        let cb = on_progress.clone();
+        // 将整个 whisper 推理放到独立 OS 线程，避免阻塞 tokio async runtime，
+        // 使 abort_transcription 等命令能及时被调度执行。
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let progress_cb = on_progress.clone();
         let log_cb = on_log.clone();
-        params.set_progress_callback_safe(move |pct: i32| {
-            let mapped = 0.05 + (pct as f32 / 100.0) * 0.90;
-            cb(mapped, &format!("推理中 {pct}%"));
-            log_cb(&format!("[推理] 进度 {pct}%"));
+
+        std::thread::spawn(move || {
+            let mut ctx_params = WhisperContextParameters::default();
+            ctx_params.use_gpu = use_gpu;
+
+            log_cb("[推理] 加载模型...");
+            let ctx = match WhisperContext::new_with_params(&model_path_str, ctx_params) {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tx.send(Err(AppError::Transcription(format!("加载模型失败: {e}"))));
+                    return;
+                }
+            };
+            log_cb("[推理] 模型加载完成");
+
+            let mut state = match ctx.create_state() {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = tx.send(Err(AppError::Transcription(format!("创建推理状态失败: {e}"))));
+                    return;
+                }
+            };
+
+            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            params.set_n_threads(n_threads);
+            if let Some(lang) = language.as_deref() {
+                if lang != "auto" {
+                    params.set_language(Some(lang));
+                }
+            }
+            params.set_print_progress(false);
+            params.set_print_realtime(false);
+            params.set_print_special(false);
+            params.set_print_timestamps(false);
+
+            let pcb = progress_cb.clone();
+            let lcb = log_cb.clone();
+            params.set_progress_callback_safe(move |pct: i32| {
+                let mapped = 0.05 + (pct as f32 / 100.0) * 0.90;
+                pcb(mapped, &format!("推理中 {pct}%"));
+                lcb(&format!("[推理] 进度 {pct}%"));
+            });
+
+            // 直接使用 unsafe C 回调，绕过 whisper-rs safe wrapper 的类型转发 bug
+            unsafe extern "C" fn abort_trampoline(
+                user_data: *mut std::ffi::c_void,
+            ) -> bool {
+                let flag = &*(user_data as *const AtomicBool);
+                flag.load(Ordering::Relaxed)
+            }
+            unsafe {
+                params.set_abort_callback(Some(abort_trampoline));
+                params.set_abort_callback_user_data(
+                    Arc::as_ptr(&abort_flag) as *mut std::ffi::c_void,
+                );
+            }
+
+            log_cb("[推理] 开始 whisper 推理...");
+            let full_result = state.full(params, &samples);
+            let aborted = abort_flag.load(Ordering::Relaxed);
+
+            if let Err(e) = full_result {
+                if aborted {
+                    log_cb("[推理] 用户中止了转录");
+                    let _ = tx.send(Err(AppError::Transcription("用户中止了转录".to_string())));
+                } else {
+                    let _ = tx.send(Err(AppError::Transcription(format!("Whisper 推理失败: {e}"))));
+                }
+                return;
+            }
+
+            let n_segs = state.full_n_segments();
+            log_cb(&format!("[推理] 推理完成，共 {n_segs} 个分段"));
+
+            let mut segments = Vec::with_capacity(n_segs as usize);
+            for i in 0..n_segs {
+                let Some(seg) = state.get_segment(i) else {
+                    let _ = tx.send(Err(AppError::Transcription(format!("读取分段 {i} 失败"))));
+                    return;
+                };
+                let text = match seg.to_str_lossy() {
+                    Ok(t) => t.trim().to_string(),
+                    Err(e) => {
+                        let _ = tx.send(Err(AppError::Transcription(format!("读取分段文本失败: {e}"))));
+                        return;
+                    }
+                };
+                segments.push(TranscriptionSegment {
+                    start: seg.start_timestamp() as f64 / 100.0,
+                    end: seg.end_timestamp() as f64 / 100.0,
+                    text,
+                });
+            }
+
+            progress_cb(1.0, "转录完成");
+
+            let text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n");
+            let _ = tx.send(Ok(TranscriptionResult {
+                id: uuid::Uuid::new_v4().to_string(),
+                audio_file_id,
+                model_name,
+                text,
+                segments,
+                language: req_language.unwrap_or_else(|| "auto".to_string()),
+                duration,
+                created_at: Utc::now().to_rfc3339(),
+            }));
         });
 
-        on_log("[推理] 开始 whisper 推理...");
-        state
-            .full(params, &decoded.samples_16k_mono)
-            .map_err(|e| AppError::Transcription(format!("Whisper 推理失败: {e}")))?;
-
-        let n_segments = state.full_n_segments();
-        on_log(&format!("[推理] 推理完成，共 {n_segments} 个分段"));
-
-        let mut segments = Vec::with_capacity(n_segments as usize);
-        for i in 0..n_segments {
-            let seg = state
-                .get_segment(i)
-                .ok_or_else(|| AppError::Transcription(format!("读取分段 {i} 失败")))?;
-
-            let text = seg
-                .to_str_lossy()
-                .map_err(|e| AppError::Transcription(format!("读取分段文本失败: {e}")))?
-                .trim()
-                .to_string();
-            let t0 = seg.start_timestamp();
-            let t1 = seg.end_timestamp();
-
-            segments.push(TranscriptionSegment {
-                start: t0 as f64 / 100.0,
-                end: t1 as f64 / 100.0,
-                text,
-            });
-        }
-
-        on_progress(1.0, "转录完成");
-
-        let text = segments
-            .iter()
-            .map(|s| s.text.as_str())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        Ok(TranscriptionResult {
-            id: uuid::Uuid::new_v4().to_string(),
-            audio_file_id: request.audio_file_id.clone(),
-            model_name: request.model_name.clone(),
-            text,
-            segments,
-            language: request
-                .language
-                .clone()
-                .unwrap_or_else(|| "auto".to_string()),
-            duration: decoded.duration_seconds,
-            created_at: Utc::now().to_rfc3339(),
-        })
+        rx.await.map_err(|_| AppError::Transcription("推理线程异常退出".to_string()))?
         }
     }
 }

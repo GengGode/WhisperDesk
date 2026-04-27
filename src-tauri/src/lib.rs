@@ -9,6 +9,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(server::InferenceServerState::new())
+        .manage(commands::whisper::TranscriptionAbortFlag::new())
         .invoke_handler(tauri::generate_handler![
             commands::files::select_audio_file,
             commands::files::import_audio_folder,
@@ -23,6 +24,7 @@ pub fn run() {
             commands::whisper::delete_model,
             commands::whisper::update_transcription_result,
             commands::whisper::check_cuda,
+            commands::whisper::abort_transcription,
             commands::audio::get_audio_peaks,
             commands::server::start_inference_server,
             commands::server::stop_inference_server,

@@ -2,6 +2,7 @@ import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  abortTranscription,
   exportFormats,
   exportTranscription,
   getTranscriptionResults,
@@ -16,6 +17,7 @@ export function TranscriptionPanel() {
   const files = useAudioStore((s) => s.files);
   const updateFile = useAudioStore((s) => s.updateFile);
   const activeTask = useTranscriptionStore((s) => s.activeTask);
+  const setActiveTask = useTranscriptionStore((s) => s.setActiveTask);
   const results = useTranscriptionStore((s) => s.results);
   const addResult = useTranscriptionStore((s) => s.addResult);
   const setResults = useTranscriptionStore((s) => s.setResults);
@@ -85,43 +87,53 @@ export function TranscriptionPanel() {
             {selectedFile.sampleRate}Hz
           </p>
         </div>
-        <button
-          disabled={isTranscribing}
-          className="rounded-lg bg-primary px-4 py-1.5 text-sm text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
-          onClick={async () => {
-            if (!selectedFileId) return;
-            console.log("[转录] 开始转录", {
-              fileId: selectedFileId,
-              path: selectedFile.path,
-              model: settings.modelName,
-              language: settings.language,
-              threads: settings.threads,
-            });
-            clearLogs();
-            updateFile(selectedFileId, { transcriptionStatus: "transcribing" });
-            try {
-              const payload = await transcribeAudio({
-                audioFileId: selectedFileId,
-                audioPath: selectedFile.path,
-                modelName: settings.modelName,
-                language: settings.language,
-                threads: settings.threads,
-                useGpu: settings.useGpu,
-                remoteUrl: settings.remoteUrl || undefined,
-              });
-              console.log("[转录] 完成", payload);
-              addResult(selectedFileId, payload);
-              setActiveResultIndex(0);
-              updateFile(selectedFileId, { transcriptionStatus: "completed" });
-            } catch (err) {
-              console.error("[转录] 失败", err);
-              updateFile(selectedFileId, { transcriptionStatus: "failed" });
-              setError(String(err));
-            }
-          }}
-        >
-          {isTranscribing ? "转录中..." : "开始转录"}
-        </button>
+        <div className="flex gap-2">
+          {isTranscribing ? (
+            <button
+              className="rounded-lg bg-red-500 px-4 py-1.5 text-sm text-white transition-colors hover:bg-red-600"
+              onClick={() => void abortTranscription()}
+            >
+              停止
+            </button>
+          ) : (
+            <button
+              className="rounded-lg bg-primary px-4 py-1.5 text-sm text-white transition-colors hover:bg-primary-hover"
+              onClick={async () => {
+                if (!selectedFileId) return;
+                clearLogs();
+                updateFile(selectedFileId, {
+                  transcriptionStatus: "transcribing",
+                });
+                try {
+                  const payload = await transcribeAudio({
+                    audioFileId: selectedFileId,
+                    audioPath: selectedFile.path,
+                    modelName: settings.modelName,
+                    language: settings.language,
+                    threads: settings.threads,
+                    useGpu: settings.useGpu,
+                    remoteUrl: settings.remoteUrl || undefined,
+                  });
+                  addResult(selectedFileId, payload);
+                  setActiveResultIndex(0);
+                  updateFile(selectedFileId, {
+                    transcriptionStatus: "completed",
+                  });
+                } catch (err) {
+                  const msg = String(err);
+                  const aborted = msg.includes("中止");
+                  setActiveTask(null);
+                  updateFile(selectedFileId, {
+                    transcriptionStatus: aborted ? "pending" : "failed",
+                  });
+                  if (!aborted) setError(msg);
+                }
+              }}
+            >
+              开始转录
+            </button>
+          )}
+        </div>
       </header>
 
       {/* 固定区域：提示、播放器、进度条 */}

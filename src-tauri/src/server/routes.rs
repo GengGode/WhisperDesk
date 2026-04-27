@@ -124,7 +124,8 @@ async fn transcribe(
             let _ = ltx.try_send(Ok(Event::default().event("log").data(d.to_string())));
         };
 
-        match transcriber.transcribe(on_progress, on_model_dl, on_log, &request).await {
+        let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        match transcriber.transcribe(on_progress, on_model_dl, on_log, abort_flag, &request).await {
             Ok(result) => {
                 let json = serde_json::to_string(&result).unwrap_or_default();
                 let _ = tx.send(Ok(Event::default().event("complete").data(json))).await;

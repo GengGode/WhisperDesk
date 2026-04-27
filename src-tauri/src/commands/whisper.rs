@@ -1,6 +1,8 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Window};
+use tauri::{AppHandle, Emitter, State, Window};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -13,6 +15,15 @@ use crate::services::cuda::CudaInfo;
 use crate::services::file_index::FileIndexService;
 use crate::services::paths;
 use crate::services::transcriber::{ModelInfo, TranscriberService};
+
+/// 转录中止标志，通过 Tauri State 在命令间共享
+pub struct TranscriptionAbortFlag(pub Arc<AtomicBool>);
+
+impl TranscriptionAbortFlag {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+}
 
 /// 构造转录进度回调闭包（Window → Tauri event）
 fn make_progress_cb(window: &Window, audio_file_id: &str) -> impl Fn(f32, &str) + Clone + Send + 'static {
@@ -57,9 +68,13 @@ fn make_log_cb(window: &Window) -> impl Fn(&str) + Clone + Send + 'static {
 #[tauri::command]
 pub async fn transcribe_audio(
     window: Window,
+    abort_flag: State<'_, TranscriptionAbortFlag>,
     request: TranscriptionRequest,
 ) -> Result<TranscriptionResult, AppError> {
     let log = make_log_cb(&window);
+    let flag = abort_flag.0.clone();
+    flag.store(false, Ordering::Relaxed);
+
     log(&format!(
         "[转录] 收到转录请求: file_id={}, path={}, model={}",
         request.audio_file_id, request.audio_path, request.model_name
@@ -80,6 +95,7 @@ pub async fn transcribe_audio(
                 make_progress_cb(&window, &request.audio_file_id),
                 make_model_dl_cb(&window),
                 log.clone(),
+                flag,
                 &request,
             )
             .await?
@@ -92,6 +108,20 @@ pub async fn transcribe_audio(
     index_service.save_transcription_result(&result)?;
     log("[转录] 结果已保存到数据库");
     Ok(result)
+}
+
+#[tauri::command]
+pub fn abort_transcription(
+    window: Window,
+    abort_flag: State<'_, TranscriptionAbortFlag>,
+) {
+    abort_flag.0.store(true, Ordering::Relaxed);
+    let _ = window.emit(
+        "whisper-log",
+        WhisperLogPayload {
+            message: "[转录] 收到停止请求，正在中止...".to_string(),
+        },
+    );
 }
 
 /// 远程推理：读取本地音频 → multipart POST → 解析 SSE 流 → 转发进度

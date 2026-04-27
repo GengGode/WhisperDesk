@@ -41,6 +41,10 @@ export async function ensureModel(modelName: string): Promise<string> {
   return invoke<string>("ensure_model", { modelName });
 }
 
+export async function abortTranscription(): Promise<void> {
+  return invoke<void>("abort_transcription");
+}
+
 export async function getTranscriptionResults(
   audioFileId: string,
 ): Promise<TranscriptionResult[]> {
