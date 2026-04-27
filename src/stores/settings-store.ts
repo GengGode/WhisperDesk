@@ -52,9 +52,6 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     try {
       const info = await checkCuda();
       set({ cudaAvailable: info.available, cudaMessage: info.message });
-      if (!info.available && get().settings.useGpu) {
-        get().setSettings({ useGpu: false });
-      }
     } catch {
       set({ cudaAvailable: false, cudaMessage: "CUDA 检测失败" });
     }

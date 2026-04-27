@@ -19,8 +19,8 @@ export function Sidebar({ children }: SidebarProps) {
       <div className="border-t border-border px-4 py-3">
         <GpuToggle
           checked={useGpu}
-          disabled={!cudaAvailable}
-          tooltip={cudaAvailable ? cudaMessage : `${cudaMessage}（仅支持 CPU）`}
+          localCudaAvailable={cudaAvailable}
+          tooltip={cudaAvailable ? cudaMessage : `${cudaMessage}（本机仅 CPU，远程推理仍可使用 GPU）`}
           onChange={(v) => setSettings({ useGpu: v })}
         />
       </div>
@@ -30,22 +30,25 @@ export function Sidebar({ children }: SidebarProps) {
 
 function GpuToggle({
   checked,
-  disabled,
+  localCudaAvailable,
   tooltip,
   onChange,
 }: {
   checked: boolean;
-  disabled: boolean;
+  /** 本机 CUDA 是否可用（仅用于显示提示，不阻止切换） */
+  localCudaAvailable: boolean;
   tooltip: string;
   onChange: (v: boolean) => void;
 }) {
+  const label = checked
+    ? localCudaAvailable ? "CUDA" : "GPU（远程）"
+    : "CPU";
+
   return (
     <button
       type="button"
-      className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 transition-colors ${
-        disabled ? "cursor-not-allowed opacity-50" : "hover:bg-white/60"
-      }`}
-      onClick={() => !disabled && onChange(!checked)}
+      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 transition-colors hover:bg-white/60"
+      onClick={() => onChange(!checked)}
       title={tooltip}
     >
       <div className="flex items-center gap-2">
@@ -63,17 +66,17 @@ function GpuToggle({
           />
         </svg>
         <span className="text-xs font-medium text-text-secondary">
-          {disabled ? "CPU（无 CUDA）" : checked ? "CUDA" : "CPU"}
+          {label}
         </span>
       </div>
       <span
-        className={`relative inline-flex h-5 w-9 shrink-0 rounded-full transition-colors duration-200 ${
-          disabled ? "bg-border" : checked ? "bg-primary" : "bg-border"
-        } ${disabled ? "" : "cursor-pointer"}`}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ${
+          checked ? "bg-primary" : "bg-border"
+        }`}
       >
         <span
           className={`pointer-events-none inline-block h-4 w-4 translate-y-0.5 rounded-full bg-white shadow-sm ring-0 transition-transform duration-200 ${
-            checked && !disabled ? "translate-x-[18px]" : "translate-x-0.5"
+            checked ? "translate-x-[18px]" : "translate-x-0.5"
           }`}
         />
       </span>
