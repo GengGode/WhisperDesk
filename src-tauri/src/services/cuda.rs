@@ -48,54 +48,36 @@ pub fn cuda_dll_load_failed() -> bool {
 
 #[cfg(target_os = "windows")]
 fn detect_cuda() -> CudaInfo {
-    println!("[CUDA] 开始运行时检测...");
-
-    // 如果延迟加载钩子已经记录过失败，直接返回不可用
     if cuda_dll_load_failed() {
-        let info = CudaInfo {
+        println!("[CUDA] 延迟加载阶段检测到 DLL 缺失，回退 CPU");
+        return CudaInfo {
             available: false,
             message: "CUDA DLL 加载失败（延迟加载阶段已检测到缺失）".to_string(),
         };
-        println!("[CUDA] 结论: {}", info.message);
-        return info;
     }
 
-    let nvcuda = try_load_dll("nvcuda.dll");
-    println!("[CUDA] nvcuda.dll: {}", if nvcuda { "找到" } else { "未找到" });
-
-    if !nvcuda {
-        let info = CudaInfo {
+    if !try_load_dll("nvcuda.dll") {
+        return CudaInfo {
             available: false,
             message: "未检测到 NVIDIA 驱动 (nvcuda.dll)".to_string(),
         };
-        println!("[CUDA] 结论: {}", info.message);
-        return info;
     }
 
-    let cublas = try_load_dll("cublas64_12.dll");
-    println!("[CUDA] cublas64_12.dll: {}", if cublas { "找到" } else { "未找到" });
+    let all_present = try_load_dll("cublas64_12.dll")
+        && try_load_dll("cublasLt64_12.dll")
+        && try_load_dll("cudart64_12.dll");
 
-    let cublaslt = try_load_dll("cublasLt64_12.dll");
-    println!("[CUDA] cublasLt64_12.dll: {}", if cublaslt { "找到" } else { "未找到" });
-
-    let cudart = try_load_dll("cudart64_12.dll");
-    println!("[CUDA] cudart64_12.dll: {}", if cudart { "找到" } else { "未找到" });
-
-    if !cublas || !cublaslt || !cudart {
-        let info = CudaInfo {
+    if !all_present {
+        return CudaInfo {
             available: false,
             message: "NVIDIA 驱动已安装，但 CUDA 运行时库缺失（需要 cublas/cublasLt/cudart）".to_string(),
         };
-        println!("[CUDA] 结论: {}", info.message);
-        return info;
     }
 
-    let info = CudaInfo {
+    CudaInfo {
         available: true,
         message: "CUDA 可用".to_string(),
-    };
-    println!("[CUDA] 结论: {}", info.message);
-    info
+    }
 }
 
 #[cfg(target_os = "windows")]
