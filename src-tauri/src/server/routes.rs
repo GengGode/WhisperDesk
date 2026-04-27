@@ -6,7 +6,7 @@ use axum::{
     extract::{ConnectInfo, DefaultBodyLimit, Multipart, State},
     response::{
         sse::{Event, Sse},
-        Html,
+        Html, IntoResponse, Response,
     },
     routing::{get, post},
     Json, Router,
@@ -18,6 +18,19 @@ use crate::models::audio::TranscriptionRequest;
 use crate::services::transcriber::TranscriberService;
 
 use super::dashboard::DashboardState;
+
+/// 包装 SSE 流并设置 `Content-Type: text/event-stream; charset=utf-8`
+fn sse_utf8<S>(stream: S) -> Response
+where
+    S: tokio_stream::Stream<Item = Result<Event, Infallible>> + Send + 'static,
+{
+    let mut resp = Sse::new(stream).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        "text/event-stream; charset=utf-8".parse().unwrap(),
+    );
+    resp
+}
 
 pub fn create_router(dashboard: Arc<DashboardState>) -> Router {
     Router::new()
@@ -59,7 +72,7 @@ async fn dashboard_api(
 
 async fn dashboard_events(
     State(dash): State<Arc<DashboardState>>,
-) -> Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>> {
+) -> Response {
     let mut rx = dash.subscribe();
     let (tx, stream_rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
 
@@ -87,7 +100,7 @@ async fn dashboard_events(
         }
     });
 
-    Sse::new(ReceiverStream::new(stream_rx))
+    sse_utf8(ReceiverStream::new(stream_rx))
 }
 
 async fn dashboard_page() -> Html<&'static str> {
@@ -101,7 +114,7 @@ async fn transcribe(
     State(dash): State<Arc<DashboardState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     mut multipart: Multipart,
-) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, (axum::http::StatusCode, String)> {
+) -> Result<Response, (axum::http::StatusCode, String)> {
     let mut audio_bytes: Option<Vec<u8>> = None;
     let mut language: Option<String> = None;
 
@@ -222,7 +235,7 @@ async fn transcribe(
         let _ = std::fs::remove_file(&tmp_path);
     });
 
-    Ok(Sse::new(ReceiverStream::new(rx)))
+    Ok(sse_utf8(ReceiverStream::new(rx)))
 }
 
 /// 按字符数安全截断 UTF-8 字符串，避免切到多字节字符中间
