@@ -166,6 +166,17 @@ export interface ServerConfig {
   modelName: string;
   threads: number;
   useGpu: boolean;
+  bestOf: number;
+  suppressBlank: boolean;
+  suppressNst: boolean;
+  noContext: boolean;
+  entropyThold: number;
+  logprobThold: number;
+  noSpeechThold: number;
+  temperature: number;
+  temperatureInc: number;
+  maxInitialTs: number;
+  maxRepeatFilter: number;
 }
 
 /** Dashboard 快照 */

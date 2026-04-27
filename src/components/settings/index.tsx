@@ -61,8 +61,25 @@ export function SettingsPanel() {
       modelName: settings.modelName,
       threads: settings.threads,
       useGpu: settings.useGpu,
+      bestOf: settings.bestOf,
+      suppressBlank: settings.suppressBlank,
+      suppressNst: settings.suppressNst,
+      noContext: settings.noContext,
+      entropyThold: settings.entropyThold,
+      logprobThold: settings.logprobThold,
+      noSpeechThold: settings.noSpeechThold,
+      temperature: settings.temperature,
+      temperatureInc: settings.temperatureInc,
+      maxInitialTs: settings.maxInitialTs,
+      maxRepeatFilter: settings.maxRepeatFilter,
     }).catch(() => {});
-  }, [settings.modelName, settings.threads, settings.useGpu]);
+  }, [
+    settings.modelName, settings.threads, settings.useGpu,
+    settings.bestOf, settings.suppressBlank, settings.suppressNst,
+    settings.noContext, settings.entropyThold, settings.logprobThold,
+    settings.noSpeechThold, settings.temperature, settings.temperatureInc,
+    settings.maxInitialTs, settings.maxRepeatFilter,
+  ]);
 
   useEffect(() => {
     if (!serverStatus.running) {

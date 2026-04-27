@@ -14,7 +14,39 @@ pub struct ServerConfig {
     pub model_name: String,
     pub threads: u8,
     pub use_gpu: bool,
+
+    #[serde(default = "default_best_of")]
+    pub best_of: i32,
+    #[serde(default = "default_true")]
+    pub suppress_blank: bool,
+    #[serde(default = "default_true")]
+    pub suppress_nst: bool,
+    #[serde(default = "default_true")]
+    pub no_context: bool,
+    #[serde(default = "default_entropy_thold")]
+    pub entropy_thold: f32,
+    #[serde(default = "default_logprob_thold")]
+    pub logprob_thold: f32,
+    #[serde(default = "default_no_speech_thold")]
+    pub no_speech_thold: f32,
+    #[serde(default)]
+    pub temperature: f32,
+    #[serde(default = "default_temperature_inc")]
+    pub temperature_inc: f32,
+    #[serde(default = "default_max_initial_ts")]
+    pub max_initial_ts: f32,
+    #[serde(default = "default_max_repeat_filter")]
+    pub max_repeat_filter: u32,
 }
+
+fn default_best_of() -> i32 { 5 }
+fn default_true() -> bool { true }
+fn default_entropy_thold() -> f32 { 2.4 }
+fn default_logprob_thold() -> f32 { -1.0 }
+fn default_no_speech_thold() -> f32 { 0.6 }
+fn default_temperature_inc() -> f32 { 0.2 }
+fn default_max_initial_ts() -> f32 { 1.0 }
+fn default_max_repeat_filter() -> u32 { 3 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -22,6 +54,17 @@ impl Default for ServerConfig {
             model_name: "base".to_string(),
             threads: 4,
             use_gpu: true,
+            best_of: default_best_of(),
+            suppress_blank: true,
+            suppress_nst: true,
+            no_context: true,
+            entropy_thold: default_entropy_thold(),
+            logprob_thold: default_logprob_thold(),
+            no_speech_thold: default_no_speech_thold(),
+            temperature: 0.0,
+            temperature_inc: default_temperature_inc(),
+            max_initial_ts: default_max_initial_ts(),
+            max_repeat_filter: default_max_repeat_filter(),
         }
     }
 }
