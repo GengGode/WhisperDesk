@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { deleteAudioFile } from "@/lib/tauri";
+import { deleteAudioFile, toggleStar } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
+import { useTranscriptionStore } from "@/stores/transcription-store";
 import type { AudioFile } from "@/lib/types";
 
 export interface ContextMenuState {
@@ -14,17 +15,20 @@ export interface ContextMenuState {
 interface ContextMenuProps {
   state: ContextMenuState;
   onClose: () => void;
+  onEditTags: (file: AudioFile, rect: DOMRect) => void;
 }
 
-export function ContextMenu({ state, onClose }: ContextMenuProps) {
+export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const removeFile = useAudioStore((s) => s.removeFile);
+  const updateFile = useAudioStore((s) => s.updateFile);
+  const enqueueFiles = useTranscriptionStore((s) => s.enqueueFiles);
+  const queueRunning = useTranscriptionStore((s) => s.queueRunning);
+  const setQueueRunning = useTranscriptionStore((s) => s.setQueueRunning);
 
   useEffect(() => {
     function handleDown(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose();
-      }
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
     }
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -51,6 +55,34 @@ export function ContextMenu({ state, onClose }: ContextMenuProps) {
   });
 
   const items: { label: string; danger?: boolean; action: () => void }[] = [
+    {
+      label: state.file.starred ? "取消收藏" : "收藏",
+      action: async () => {
+        onClose();
+        try {
+          const newVal = await toggleStar(state.file.id);
+          updateFile(state.file.id, { starred: newVal });
+        } catch (err) {
+          console.error("[文件] 切换收藏失败", err);
+        }
+      },
+    },
+    {
+      label: "编辑标签",
+      action: () => {
+        const rect = menuRef.current?.getBoundingClientRect();
+        onClose();
+        if (rect) onEditTags(state.file, rect);
+      },
+    },
+    {
+      label: "转录此文件",
+      action: () => {
+        onClose();
+        enqueueFiles([state.file.id]);
+        if (!queueRunning) setQueueRunning(true);
+      },
+    },
     {
       label: "在资源管理器中显示",
       action: async () => {
@@ -99,9 +131,7 @@ export function ContextMenu({ state, onClose }: ContextMenuProps) {
           key={i}
           onClick={item.action}
           className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors ${
-            item.danger
-              ? "text-red-500 hover:bg-red-500/10"
-              : "hover:bg-surface-secondary"
+            item.danger ? "text-red-500 hover:bg-red-500/10" : "hover:bg-surface-secondary"
           }`}
         >
           {item.label}

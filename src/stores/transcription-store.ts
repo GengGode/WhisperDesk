@@ -8,14 +8,17 @@ import type {
 const MAX_LOGS = 500;
 
 interface TranscriptionState {
-  /** key = audioFileId，值为该文件的全部转录结果（按时间倒序） */
   results: Map<string, TranscriptionResult[]>;
   activeTask: TranscriptionProgress | null;
   modelDownload: { modelName: string; progress: number } | null;
   logs: WhisperLog[];
-  /** 追加一条转录结果（最新的插到数组头部） */
+
+  // 批量转录队列
+  queue: string[];
+  queueRunning: boolean;
+  queueIndex: number;
+
   addResult: (audioFileId: string, result: TranscriptionResult) => void;
-  /** 批量设置某文件的所有结果（从数据库加载时用） */
   setResults: (audioFileId: string, results: TranscriptionResult[]) => void;
   setActiveTask: (task: TranscriptionProgress | null) => void;
   setModelDownload: (
@@ -23,6 +26,12 @@ interface TranscriptionState {
   ) => void;
   addLog: (message: string) => void;
   clearLogs: () => void;
+
+  enqueueFiles: (ids: string[]) => void;
+  dequeueFile: (id: string) => void;
+  advanceQueue: () => void;
+  clearQueue: () => void;
+  setQueueRunning: (running: boolean) => void;
 }
 
 export const useTranscriptionStore = create<TranscriptionState>((set) => ({
@@ -30,6 +39,9 @@ export const useTranscriptionStore = create<TranscriptionState>((set) => ({
   activeTask: null,
   modelDownload: null,
   logs: [],
+  queue: [],
+  queueRunning: false,
+  queueIndex: 0,
 
   addResult: (audioFileId, result) =>
     set((state) => {
@@ -56,4 +68,25 @@ export const useTranscriptionStore = create<TranscriptionState>((set) => ({
       return { logs: next.length > MAX_LOGS ? next.slice(-MAX_LOGS) : next };
     }),
   clearLogs: () => set({ logs: [] }),
+
+  enqueueFiles: (ids) =>
+    set((state) => {
+      const existing = new Set(state.queue);
+      const toAdd = ids.filter((id) => !existing.has(id));
+      return { queue: [...state.queue, ...toAdd] };
+    }),
+
+  dequeueFile: (id) =>
+    set((state) => ({
+      queue: state.queue.filter((qid) => qid !== id),
+    })),
+
+  advanceQueue: () =>
+    set((state) => ({ queueIndex: state.queueIndex + 1 })),
+
+  clearQueue: () =>
+    set({ queue: [], queueIndex: 0, queueRunning: false }),
+
+  setQueueRunning: (running) =>
+    set(running ? { queueRunning: true, queueIndex: 0 } : { queueRunning: false }),
 }));

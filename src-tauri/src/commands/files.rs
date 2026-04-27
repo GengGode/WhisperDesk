@@ -152,6 +152,27 @@ pub fn import_audio_files(app: AppHandle, paths: Vec<String>) -> Result<Vec<Audi
     Ok(imported)
 }
 
+#[tauri::command]
+pub fn toggle_star(id: String) -> Result<bool, AppError> {
+    let service = FileIndexService::portable()?;
+    service.init()?;
+    service.toggle_star(&id)
+}
+
+#[tauri::command]
+pub fn set_file_tags(id: String, tags: Vec<String>) -> Result<(), AppError> {
+    let service = FileIndexService::portable()?;
+    service.init()?;
+    service.set_tags(&id, &tags)
+}
+
+#[tauri::command]
+pub fn list_all_tags() -> Result<Vec<String>, AppError> {
+    let service = FileIndexService::portable()?;
+    service.init()?;
+    service.list_all_tags()
+}
+
 fn is_audio_file(path: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
         return false;

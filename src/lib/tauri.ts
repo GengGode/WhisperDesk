@@ -42,6 +42,18 @@ export async function importAudioFiles(paths: string[]): Promise<AudioFile[]> {
   return invoke<AudioFile[]>("import_audio_files", { paths });
 }
 
+export async function toggleStar(id: string): Promise<boolean> {
+  return invoke<boolean>("toggle_star", { id });
+}
+
+export async function setFileTags(id: string, tags: string[]): Promise<void> {
+  return invoke<void>("set_file_tags", { id, tags });
+}
+
+export async function listAllTags(): Promise<string[]> {
+  return invoke<string[]>("list_all_tags");
+}
+
 export async function transcribeAudio(
   request: TranscriptionRequest,
 ): Promise<TranscriptionResult> {

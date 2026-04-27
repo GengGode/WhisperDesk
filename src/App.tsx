@@ -7,6 +7,7 @@ import { EditorPanel } from "@/components/editor";
 import { SettingsPanel } from "@/components/settings";
 import {
   listAudioFiles,
+  listAllTags,
   listenModelDownloadProgress,
   listenTranscriptionProgress,
   listenWhisperLog,
@@ -14,16 +15,20 @@ import {
 import { useAudioStore } from "@/stores/audio-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
+import { useTranscriptionQueue } from "@/hooks/use-transcription-queue";
 
 type Page = "files" | "transcription" | "editor" | "settings";
 
 function App() {
   const [page, setPage] = useState<Page>("files");
   const setFiles = useAudioStore((s) => s.setFiles);
+  const setAllTags = useAudioStore((s) => s.setAllTags);
   const setActiveTask = useTranscriptionStore((s) => s.setActiveTask);
   const setModelDownload = useTranscriptionStore((s) => s.setModelDownload);
   const addLog = useTranscriptionStore((s) => s.addLog);
   const initCuda = useSettingsStore((s) => s.initCuda);
+
+  useTranscriptionQueue();
 
   useEffect(() => {
     console.log("[App] 初始化：检测 CUDA");
@@ -36,6 +41,10 @@ function App() {
         setFiles(files);
       })
       .catch((err) => console.error("[App] 加载音频列表失败", err));
+
+    void listAllTags()
+      .then((tags) => setAllTags(tags))
+      .catch((err) => console.error("[App] 加载标签列表失败", err));
 
     const unlistenProgress = listenTranscriptionProgress((payload) => {
       console.log("[事件] 转录进度", payload);
@@ -54,7 +63,7 @@ function App() {
       void unlistenModel.then((off) => off());
       void unlistenLog.then((off) => off());
     };
-  }, [initCuda, addLog, setActiveTask, setFiles, setModelDownload]);
+  }, [initCuda, addLog, setActiveTask, setFiles, setModelDownload, setAllTags]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">

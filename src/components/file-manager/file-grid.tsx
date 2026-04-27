@@ -2,16 +2,13 @@ import type { AudioFile, TranscriptionStatus } from "@/lib/types";
 import { useAudioStore } from "@/stores/audio-store";
 import { toggleStar } from "@/lib/tauri";
 
-interface FileItemProps {
-  file: AudioFile;
+interface FileGridProps {
+  files: AudioFile[];
   visibleIds: string[];
   onContextMenu: (e: React.MouseEvent, file: AudioFile) => void;
 }
 
-const STATUS_CONFIG: Record<
-  TranscriptionStatus,
-  { color: string; label: string; animate?: boolean }
-> = {
+const STATUS_CONFIG: Record<TranscriptionStatus, { color: string; label: string; animate?: boolean }> = {
   pending: { color: "bg-text-secondary/40", label: "待转录" },
   transcribing: { color: "bg-blue-500", label: "转录中", animate: true },
   completed: { color: "bg-emerald-500", label: "已完成" },
@@ -27,7 +24,25 @@ const FORMAT_COLORS: Record<string, string> = {
   aac: "bg-rose-500/15 text-rose-600",
 };
 
-export function FileItem({ file, visibleIds, onContextMenu }: FileItemProps) {
+export function FileGrid({ files, visibleIds, onContextMenu }: FileGridProps) {
+  return (
+    <div className="grid auto-rows-min grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-3 p-2">
+      {files.map((file) => (
+        <GridCard key={file.id} file={file} visibleIds={visibleIds} onContextMenu={onContextMenu} />
+      ))}
+    </div>
+  );
+}
+
+function GridCard({
+  file,
+  visibleIds,
+  onContextMenu,
+}: {
+  file: AudioFile;
+  visibleIds: string[];
+  onContextMenu: (e: React.MouseEvent, file: AudioFile) => void;
+}) {
   const selectedFileId = useAudioStore((s) => s.selectedFileId);
   const selectedFileIds = useAudioStore((s) => s.selectedFileIds);
   const selectFile = useAudioStore((s) => s.selectFile);
@@ -68,17 +83,17 @@ export function FileItem({ file, visibleIds, onContextMenu }: FileItemProps) {
     <button
       onClick={handleClick}
       onContextMenu={(e) => onContextMenu(e, file)}
-      className={`group flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left transition-colors ${
+      className={`group relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors ${
         isFocused
-          ? "bg-primary/10 text-primary"
+          ? "border-primary bg-primary/5"
           : isChecked
-            ? "bg-primary/5"
-            : "hover:bg-surface-secondary"
+            ? "border-primary/40 bg-primary/5"
+            : "border-border hover:border-primary/30 hover:bg-surface-secondary"
       }`}
     >
-      {/* 复选框 */}
+      {/* 左上角复选框 */}
       <span
-        className={`flex size-4 shrink-0 items-center justify-center rounded border transition-colors ${
+        className={`absolute left-2 top-2 flex size-4 items-center justify-center rounded border transition-colors ${
           isChecked
             ? "border-primary bg-primary text-white"
             : "border-border group-hover:border-text-secondary"
@@ -95,19 +110,37 @@ export function FileItem({ file, visibleIds, onContextMenu }: FileItemProps) {
         )}
       </span>
 
-      {/* 转录状态 */}
+      {/* 右上角星标 */}
       <span
-        className={`size-2 shrink-0 rounded-full ${status.color} ${status.animate ? "animate-pulse" : ""}`}
-        title={status.label}
-      />
+        className={`absolute right-2 top-2 cursor-pointer transition-colors ${
+          file.starred
+            ? "text-amber-500"
+            : "text-transparent group-hover:text-text-secondary/40"
+        }`}
+        onClick={handleStar}
+      >
+        <svg className="size-4" fill={file.starred ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
+        </svg>
+      </span>
 
-      {/* 文件名 */}
-      <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
+      {/* 文件名 + 状态 */}
+      <div className="flex items-start gap-1.5 pt-4">
+        <span className={`mt-1.5 size-2 shrink-0 rounded-full ${status.color} ${status.animate ? "animate-pulse" : ""}`} title={status.label} />
+        <span className="min-w-0 flex-1 truncate text-sm font-medium">{file.name}</span>
+      </div>
+
+      {/* 格式 + 时长 */}
+      <div className="flex items-center gap-2 text-xs text-text-secondary">
+        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${formatClass}`}>{file.format}</span>
+        <span className="tabular-nums">{formatDuration(file.duration)}</span>
+        <span>{formatSize(file.size)}</span>
+      </div>
 
       {/* 标签 */}
       {file.tags.length > 0 && (
-        <span className="hidden items-center gap-0.5 sm:flex">
-          {file.tags.slice(0, 2).map((tag) => (
+        <div className="flex flex-wrap gap-1">
+          {file.tags.slice(0, 3).map((tag) => (
             <span
               key={tag}
               onClick={(e) => {
@@ -119,41 +152,11 @@ export function FileItem({ file, visibleIds, onContextMenu }: FileItemProps) {
               {tag}
             </span>
           ))}
-          {file.tags.length > 2 && (
-            <span className="text-[10px] text-text-secondary">+{file.tags.length - 2}</span>
+          {file.tags.length > 3 && (
+            <span className="text-[10px] text-text-secondary">+{file.tags.length - 3}</span>
           )}
-        </span>
+        </div>
       )}
-
-      {/* 星标 */}
-      <span
-        onClick={handleStar}
-        className={`shrink-0 cursor-pointer transition-colors ${
-          file.starred
-            ? "text-amber-500"
-            : "text-transparent group-hover:text-text-secondary/40"
-        }`}
-        title={file.starred ? "取消收藏" : "收藏"}
-      >
-        <svg className="size-4" fill={file.starred ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.562.562 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.562.562 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z" />
-        </svg>
-      </span>
-
-      {/* 格式 */}
-      <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase ${formatClass}`}>
-        {file.format}
-      </span>
-
-      {/* 时长 */}
-      <span className="shrink-0 text-xs tabular-nums text-text-secondary">
-        {formatDuration(file.duration)}
-      </span>
-
-      {/* 文件大小 */}
-      <span className="hidden shrink-0 text-xs text-text-secondary group-hover:inline sm:inline">
-        {formatSize(file.size)}
-      </span>
     </button>
   );
 }

@@ -10,6 +10,8 @@ export interface AudioFile {
   size: number;
   createdAt: string;
   transcriptionStatus: TranscriptionStatus;
+  starred: boolean;
+  tags: string[];
 }
 
 export type TranscriptionStatus =

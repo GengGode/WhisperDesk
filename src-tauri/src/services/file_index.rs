@@ -94,6 +94,30 @@ impl FileIndexService {
             )?;
         }
 
+        // 迁移：添加 starred 列
+        let has_starred: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name = 'starred'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? > 0;
+        if !has_starred {
+            conn.execute_batch(
+                "ALTER TABLE audio_files ADD COLUMN starred INTEGER NOT NULL DEFAULT 0;",
+            )?;
+        }
+
+        // 迁移：添加 tags 列（JSON 数组字符串）
+        let has_tags: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name = 'tags'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? > 0;
+        if !has_tags {
+            conn.execute_batch(
+                "ALTER TABLE audio_files ADD COLUMN tags TEXT NOT NULL DEFAULT '[]';",
+            )?;
+        }
+
         Ok(())
     }
 
@@ -125,6 +149,8 @@ impl FileIndexService {
             size: file_meta.len(),
             created_at: Utc::now().to_rfc3339(),
             transcription_status: TranscriptionStatus::Pending,
+            starred: false,
+            tags: vec![],
         };
         self.upsert_audio(&model)?;
         Ok(model)
@@ -132,12 +158,14 @@ impl FileIndexService {
 
     pub fn upsert_audio(&self, file: &AudioFileMeta) -> Result<(), AppError> {
         let conn = Connection::open(&self.db_path)?;
+        let tags_json = serde_json::to_string(&file.tags)
+            .map_err(|e| AppError::Database(format!("序列化标签失败: {e}")))?;
         conn.execute(
-            "
-            INSERT INTO audio_files (
-                id, name, path, format, duration, sample_rate, channels, size, created_at, transcription_status
+            "INSERT INTO audio_files (
+                id, name, path, format, duration, sample_rate, channels, size,
+                created_at, transcription_status, starred, tags
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(path) DO UPDATE SET
                 name = excluded.name,
                 format = excluded.format,
@@ -145,8 +173,7 @@ impl FileIndexService {
                 sample_rate = excluded.sample_rate,
                 channels = excluded.channels,
                 size = excluded.size,
-                transcription_status = excluded.transcription_status
-            ",
+                transcription_status = excluded.transcription_status",
             params![
                 file.id,
                 file.name,
@@ -158,6 +185,8 @@ impl FileIndexService {
                 file.size,
                 file.created_at,
                 status_to_str(&file.transcription_status),
+                file.starred as i32,
+                tags_json,
             ],
         )?;
         Ok(())
@@ -166,30 +195,81 @@ impl FileIndexService {
     pub fn list_audio(&self) -> Result<Vec<AudioFileMeta>, AppError> {
         let conn = Connection::open(&self.db_path)?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, path, format, duration, sample_rate, channels, size, created_at, transcription_status
+            "SELECT id, name, path, format, duration, sample_rate, channels, size,
+                    created_at, transcription_status, starred, tags
              FROM audio_files
              ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map([], |row| {
-            Ok(AudioFileMeta {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                path: row.get(2)?,
-                format: row.get(3)?,
-                duration: row.get(4)?,
-                sample_rate: row.get(5)?,
-                channels: row.get(6)?,
-                size: row.get(7)?,
-                created_at: row.get(8)?,
-                transcription_status: str_to_status(row.get::<_, String>(9)?.as_str()),
-            })
+            let tags_json: String = row.get(11)?;
+            Ok((
+                row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?,
+                row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?,
+                row.get(8)?, row.get::<_, String>(9)?,
+                row.get::<_, i32>(10)?, tags_json,
+            ))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            out.push(row?);
+            let (id, name, path, format, duration, sample_rate, channels, size,
+                 created_at, status_str, starred_int, tags_json):
+                (String, String, String, String, f64, u32, u16, u64,
+                 String, String, i32, String) = row?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+            out.push(AudioFileMeta {
+                id, name, path, format, duration, sample_rate, channels, size,
+                created_at,
+                transcription_status: str_to_status(&status_str),
+                starred: starred_int != 0,
+                tags,
+            });
         }
         Ok(out)
+    }
+
+    /// 切换收藏状态，返回新状态
+    pub fn toggle_star(&self, id: &str) -> Result<bool, AppError> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute(
+            "UPDATE audio_files SET starred = CASE WHEN starred = 0 THEN 1 ELSE 0 END WHERE id = ?",
+            params![id],
+        )?;
+        let new_val: i32 = conn.query_row(
+            "SELECT starred FROM audio_files WHERE id = ?",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(new_val != 0)
+    }
+
+    /// 替换文件的全部标签
+    pub fn set_tags(&self, id: &str, tags: &[String]) -> Result<(), AppError> {
+        let conn = Connection::open(&self.db_path)?;
+        let tags_json = serde_json::to_string(tags)
+            .map_err(|e| AppError::Database(format!("序列化标签失败: {e}")))?;
+        conn.execute(
+            "UPDATE audio_files SET tags = ? WHERE id = ?",
+            params![tags_json, id],
+        )?;
+        Ok(())
+    }
+
+    /// 获取所有使用中的不重复标签
+    pub fn list_all_tags(&self) -> Result<Vec<String>, AppError> {
+        let conn = Connection::open(&self.db_path)?;
+        let mut stmt = conn.prepare("SELECT tags FROM audio_files WHERE tags != '[]'")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        let mut tag_set = std::collections::BTreeSet::new();
+        for row in rows {
+            let json = row?;
+            if let Ok(tags) = serde_json::from_str::<Vec<String>>(&json) {
+                for t in tags {
+                    tag_set.insert(t);
+                }
+            }
+        }
+        Ok(tag_set.into_iter().collect())
     }
 
     /// 从索引中删除音频文件及其关联的转录结果（不删除磁盘文件）

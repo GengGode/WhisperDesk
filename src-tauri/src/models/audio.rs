@@ -16,6 +16,8 @@ pub struct AudioFileMeta {
     pub size: u64,
     pub created_at: String,
     pub transcription_status: TranscriptionStatus,
+    pub starred: bool,
+    pub tags: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
