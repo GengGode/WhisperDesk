@@ -127,6 +127,7 @@ async fn transcribe_via_remote(
     let mut result: Option<TranscriptionResult> = None;
     let mut current_event = String::new();
     let mut data_buf = String::new();
+    let mut line_buf = String::new();
 
     let mut stream = resp;
     while let Some(chunk) = stream
@@ -135,7 +136,12 @@ async fn transcribe_via_remote(
         .map_err(|e| AppError::Transcription(format!("读取远程响应失败: {e}")))?
     {
         let text = String::from_utf8_lossy(&chunk);
-        for line in text.lines() {
+        line_buf.push_str(&text);
+
+        while let Some(pos) = line_buf.find('\n') {
+            let line = line_buf[..pos].trim_end_matches('\r').to_string();
+            line_buf = line_buf[pos + 1..].to_string();
+
             if let Some(ev) = line.strip_prefix("event: ") {
                 current_event = ev.trim().to_string();
             } else if let Some(d) = line.strip_prefix("data: ") {

@@ -1,7 +1,7 @@
 use std::convert::Infallible;
 
 use axum::{
-    extract::Multipart,
+    extract::{DefaultBodyLimit, Multipart},
     response::sse::{Event, Sse},
     routing::{get, post},
     Json, Router,
@@ -17,6 +17,7 @@ pub fn create_router() -> Router {
         .route("/api/health", get(health))
         .route("/api/models", get(models))
         .route("/api/transcribe", post(transcribe))
+        .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
         .layer(CorsLayer::permissive())
 }
 
