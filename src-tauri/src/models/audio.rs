@@ -105,6 +105,7 @@ pub enum ExportFormat {
     Txt,
     Srt,
     Json,
+    Lrc,
 }
 
 /// 导出请求参数（通过 result id 定位）

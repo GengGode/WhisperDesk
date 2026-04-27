@@ -73,7 +73,7 @@ export interface TranscriptionRequest {
   remoteUrl?: string;
 }
 
-export type ExportFormat = "txt" | "srt" | "json";
+export type ExportFormat = "txt" | "srt" | "json" | "lrc";
 
 export interface ExportRequest {
   resultId: string;

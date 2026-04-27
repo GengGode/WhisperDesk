@@ -109,7 +109,7 @@ export function listenImportFolderProgress(
   });
 }
 
-export const exportFormats: ExportFormat[] = ["txt", "srt", "json"];
+export const exportFormats: ExportFormat[] = ["txt", "srt", "json", "lrc"];
 
 export async function listModels(): Promise<WhisperModel[]> {
   return invoke<WhisperModel[]>("list_models");

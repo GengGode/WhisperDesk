@@ -363,6 +363,7 @@ pub fn export_transcription(app: AppHandle, request: ExportRequest) -> Result<Op
         ExportFormat::Json => serde_json::to_string_pretty(&result)
             .map_err(|e| AppError::FileSystem(format!("序列化 JSON 失败: {e}")))?,
         ExportFormat::Srt => to_srt(&result),
+        ExportFormat::Lrc => to_lrc(&result),
     };
 
     std::fs::write(&path, content)?;
@@ -393,11 +394,34 @@ fn format_srt_time(seconds: f64) -> String {
     format!("{h:02}:{m:02}:{s:02},{ms:03}")
 }
 
+fn to_lrc(result: &TranscriptionResult) -> String {
+    let mut lines = Vec::with_capacity(result.segments.len() + 3);
+    lines.push("[by:WhisperDesk]".to_string());
+    lines.push(format!("[length:{}]", format_lrc_time(result.duration)));
+    lines.push(String::new());
+    for segment in &result.segments {
+        let text = segment.text.trim();
+        if !text.is_empty() {
+            lines.push(format!("[{}]{}", format_lrc_time(segment.start), text));
+        }
+    }
+    lines.join("\n")
+}
+
+fn format_lrc_time(seconds: f64) -> String {
+    let total_cs = (seconds * 100.0).round() as u64;
+    let m = total_cs / 6000;
+    let s = (total_cs % 6000) / 100;
+    let cs = total_cs % 100;
+    format!("{m:02}:{s:02}.{cs:02}")
+}
+
 fn export_filename(audio_id: &str, model_name: &str, format: &ExportFormat) -> String {
     let ext = match format {
         ExportFormat::Txt => "txt",
         ExportFormat::Json => "json",
         ExportFormat::Srt => "srt",
+        ExportFormat::Lrc => "lrc",
     };
     format!("transcription-{audio_id}-{model_name}.{ext}")
 }
