@@ -30,6 +30,7 @@ pub fn run() {
             commands::server::stop_inference_server,
             commands::server::get_inference_server_status,
             commands::server::get_dashboard_status,
+            commands::server::set_server_config,
         ])
         .setup(|app| {
             let webview_dir = services::paths::webview_data_dir()

@@ -8,7 +8,7 @@ use tokio::task::JoinHandle;
 
 use serde::Serialize;
 
-pub use dashboard::{DashboardSnapshot, DashboardState};
+pub use dashboard::{DashboardSnapshot, DashboardState, ServerConfig};
 
 /// 推理服务运行时状态，由 Tauri manage() 或 headless 模式持有
 pub struct InferenceServerState {
@@ -46,6 +46,10 @@ impl InferenceServerState {
     /// 获取 Dashboard 快照（供 Tauri Command 使用）
     pub fn dashboard_snapshot(&self) -> DashboardSnapshot {
         self.dashboard.snapshot()
+    }
+
+    pub fn set_server_config(&self, cfg: ServerConfig) {
+        self.dashboard.set_config(cfg);
     }
 
     pub async fn start(&self, port: u16) -> Result<(), String> {

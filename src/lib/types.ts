@@ -133,11 +133,19 @@ export interface DashboardTaskInfo {
   resultSummary?: string;
 }
 
+/** 服务端转录配置 */
+export interface ServerConfig {
+  modelName: string;
+  threads: number;
+  useGpu: boolean;
+}
+
 /** Dashboard 快照 */
 export interface DashboardSnapshot {
   uptimeSeconds: number;
   gpu: boolean;
   gpuMessage: string;
+  serverConfig: ServerConfig;
   activeTasks: DashboardTaskInfo[];
   completedTasks: DashboardTaskInfo[];
 }

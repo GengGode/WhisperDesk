@@ -168,14 +168,10 @@ async fn transcribe_via_remote(
         .unwrap();
 
     let mut form = reqwest::multipart::Form::new()
-        .part("file", file_part)
-        .text("model_name", request.model_name.clone());
+        .part("file", file_part);
 
     if let Some(lang) = &request.language {
         form = form.text("language", lang.clone());
-    }
-    if let Some(t) = request.threads {
-        form = form.text("threads", t.to_string());
     }
 
     let url = format!("{}/api/transcribe", remote_url.trim_end_matches('/'));

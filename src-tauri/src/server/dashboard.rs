@@ -2,10 +2,29 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::Mutex;
 
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 const MAX_COMPLETED: usize = 50;
+
+/// 转录配置（由客户端 settings 同步到内存，不独立持久化）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerConfig {
+    pub model_name: String,
+    pub threads: u8,
+    pub use_gpu: bool,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            model_name: "base".to_string(),
+            threads: 4,
+            use_gpu: true,
+        }
+    }
+}
 
 /// 任务状态枚举
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -49,6 +68,7 @@ pub struct DashboardSnapshot {
     pub uptime_seconds: i64,
     pub gpu: bool,
     pub gpu_message: String,
+    pub server_config: ServerConfig,
     pub active_tasks: Vec<TaskInfo>,
     pub completed_tasks: Vec<TaskInfo>,
 }
@@ -57,6 +77,7 @@ pub struct DashboardSnapshot {
 pub struct DashboardState {
     active_tasks: Mutex<HashMap<String, TaskInfo>>,
     completed_tasks: Mutex<VecDeque<TaskInfo>>,
+    config: Mutex<ServerConfig>,
     started_at: DateTime<Utc>,
     event_tx: broadcast::Sender<DashboardEvent>,
 }
@@ -67,9 +88,18 @@ impl DashboardState {
         Self {
             active_tasks: Mutex::new(HashMap::new()),
             completed_tasks: Mutex::new(VecDeque::new()),
+            config: Mutex::new(ServerConfig::default()),
             started_at: Utc::now(),
             event_tx,
         }
+    }
+
+    pub fn get_config(&self) -> ServerConfig {
+        self.config.lock().unwrap().clone()
+    }
+
+    pub fn set_config(&self, cfg: ServerConfig) {
+        *self.config.lock().unwrap() = cfg;
     }
 
     /// 注册新任务（收到请求时调用）
@@ -149,6 +179,7 @@ impl DashboardState {
             uptime_seconds: uptime,
             gpu: cuda_info.available,
             gpu_message: cuda_info.message.clone(),
+            server_config: self.get_config(),
             active_tasks: active,
             completed_tasks: completed,
         }

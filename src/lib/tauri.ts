@@ -6,6 +6,7 @@ import type {
   DashboardSnapshot,
   ExportFormat,
   ExportRequest,
+  ServerConfig,
   ServerStatus,
   TranscriptionProgress,
   TranscriptionRequest,
@@ -14,6 +15,7 @@ import type {
   WaveformData,
   WhisperModel,
 } from "@/lib/types";
+
 
 /**
  * 与 Tauri 后端通信的统一封装层
@@ -159,4 +161,9 @@ export async function checkCuda(): Promise<CudaInfo> {
 /** 获取推理服务 Dashboard 快照 */
 export async function getDashboardStatus(): Promise<DashboardSnapshot> {
   return invoke<DashboardSnapshot>("get_dashboard_status");
+}
+
+/** 同步客户端转录配置到服务端内存 */
+export async function setServerConfig(config: ServerConfig): Promise<void> {
+  return invoke<void>("set_server_config", { config });
 }

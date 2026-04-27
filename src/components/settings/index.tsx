@@ -6,6 +6,7 @@ import {
   getInferenceServerStatus,
   listModels,
   openModelsDir,
+  setServerConfig,
   startInferenceServer,
   stopInferenceServer,
   testRemoteConnection,
@@ -54,6 +55,14 @@ export function SettingsPanel() {
 
   const [dashboard, setDashboard] = useState<DashboardSnapshot | null>(null);
   const dashPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  useEffect(() => {
+    setServerConfig({
+      modelName: settings.modelName,
+      threads: settings.threads,
+      useGpu: settings.useGpu,
+    }).catch(() => {});
+  }, [settings.modelName, settings.threads, settings.useGpu]);
 
   useEffect(() => {
     if (!serverStatus.running) {

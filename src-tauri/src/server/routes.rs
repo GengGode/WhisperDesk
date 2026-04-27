@@ -103,10 +103,7 @@ async fn transcribe(
     mut multipart: Multipart,
 ) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, (axum::http::StatusCode, String)> {
     let mut audio_bytes: Option<Vec<u8>> = None;
-    let mut model_name = "base".to_string();
     let mut language: Option<String> = None;
-    let mut threads: Option<u8> = None;
-    let mut use_gpu: Option<bool> = None;
 
     while let Some(field) = multipart.next_field().await.map_err(|e| {
         (axum::http::StatusCode::BAD_REQUEST, format!("解析 multipart 失败: {e}"))
@@ -122,13 +119,10 @@ async fn transcribe(
                         .to_vec(),
                 );
             }
-            "model_name" => model_name = field.text().await.unwrap_or_default(),
             "language" => {
                 let v = field.text().await.unwrap_or_default();
                 if !v.is_empty() { language = Some(v); }
             }
-            "threads" => threads = field.text().await.ok().and_then(|t| t.parse().ok()),
-            "use_gpu" => use_gpu = field.text().await.ok().and_then(|t| t.parse().ok()),
             _ => {}
         }
     }
@@ -136,11 +130,13 @@ async fn transcribe(
     let audio_bytes = audio_bytes
         .ok_or_else(|| (axum::http::StatusCode::BAD_REQUEST, "缺少音频文件 (field name: file)".to_string()))?;
 
+    let cfg = dash.get_config();
+
     let task_id = uuid::Uuid::new_v4().to_string();
     let client_ip = addr.ip().to_string();
     let file_size = audio_bytes.len() as u64;
 
-    dash.register_task(&task_id, &client_ip, file_size, &model_name);
+    dash.register_task(&task_id, &client_ip, file_size, &cfg.model_name);
 
     let tmp_dir = std::env::temp_dir().join("whisperdesk_server");
     std::fs::create_dir_all(&tmp_dir)
@@ -153,10 +149,10 @@ async fn transcribe(
     let request = TranscriptionRequest {
         audio_file_id: task_id.clone(),
         audio_path: tmp_path.to_string_lossy().to_string(),
-        model_name,
+        model_name: cfg.model_name,
         language,
-        threads,
-        use_gpu,
+        threads: Some(cfg.threads),
+        use_gpu: Some(cfg.use_gpu),
         remote_url: None,
     };
 

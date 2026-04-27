@@ -121,6 +121,10 @@
         <div class="card-label">已完成</div>
         <div class="card-value green" id="completedCount">0</div>
       </div>
+      <div class="card">
+        <div class="card-label">当前模型</div>
+        <div class="card-value" id="modelName" style="font-size:1.1rem">--</div>
+      </div>
     </div>
 
     <div class="section-title">活跃任务</div>
@@ -242,8 +246,11 @@
     activeTasks = {};
     (data.activeTasks || []).forEach(function(t) { activeTasks[t.id] = t; });
     completedTasks = data.completedTasks || [];
+    var cfg = data.serverConfig || {};
     document.getElementById("subtitle").textContent =
-      "GPU: " + (gpuAvailable ? "可用" : "不可用") + (gpuMessage ? " — " + gpuMessage : "");
+      "GPU: " + (gpuAvailable ? "可用" : "不可用") + (gpuMessage ? " — " + gpuMessage : "")
+      + " | 线程: " + (cfg.threads || "?") + " | GPU加速: " + (cfg.useGpu ? "开" : "关");
+    document.getElementById("modelName").textContent = cfg.modelName || "--";
     render();
   }
 
