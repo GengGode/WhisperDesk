@@ -154,6 +154,17 @@ async fn transcribe(
         threads: Some(cfg.threads),
         use_gpu: Some(cfg.use_gpu),
         remote_url: None,
+        best_of: None,
+        suppress_blank: None,
+        suppress_nst: None,
+        no_context: None,
+        entropy_thold: None,
+        logprob_thold: None,
+        no_speech_thold: None,
+        temperature: None,
+        temperature_inc: None,
+        max_initial_ts: None,
+        max_repeat_filter: None,
     };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);

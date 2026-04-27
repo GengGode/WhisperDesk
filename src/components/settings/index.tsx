@@ -225,6 +225,176 @@ export function SettingsPanel() {
           </label>
         </div>
 
+        {/* Whisper 推理参数（高级） */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-text-secondary">
+            推理参数（高级）
+          </h3>
+
+          <div className="rounded-lg border border-border p-4 space-y-4">
+            {/* 开关类参数 */}
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+              <label className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium">抑制空白</span>
+                  <p className="text-xs text-text-secondary">抑制空白 token 输出</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-primary"
+                  checked={settings.suppressBlank}
+                  onChange={(e) => setSettings({ suppressBlank: e.target.checked })}
+                />
+              </label>
+
+              <label className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium">抑制非语音</span>
+                  <p className="text-xs text-text-secondary">过滤笑声、音乐等非语音 token</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-primary"
+                  checked={settings.suppressNst}
+                  onChange={(e) => setSettings({ suppressNst: e.target.checked })}
+                />
+              </label>
+
+              <label className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium">禁用上下文</span>
+                  <p className="text-xs text-text-secondary">防止前段幻觉传播到后续分段</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-primary"
+                  checked={settings.noContext}
+                  onChange={(e) => setSettings({ noContext: e.target.checked })}
+                />
+              </label>
+            </div>
+
+            {/* 数值类参数 */}
+            <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">采样候选数</span>
+                <p className="text-xs text-text-secondary">Greedy 采样 best_of，越大越准但更慢</p>
+                <input
+                  type="number"
+                  min={1}
+                  max={10}
+                  step={1}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.bestOf}
+                  onChange={(e) => setSettings({ bestOf: Math.max(1, Math.min(10, Math.round(Number(e.target.value) || 5))) })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">初始温度</span>
+                <p className="text-xs text-text-secondary">解码温度，0 = 确定性输出</p>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.temperature}
+                  onChange={(e) => setSettings({ temperature: Math.max(0, Math.min(1, Number(e.target.value) || 0)) })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">温度递增</span>
+                <p className="text-xs text-text-secondary">解码失败时温度递增步长</p>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.1}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.temperatureInc}
+                  onChange={(e) => setSettings({ temperatureInc: Math.max(0, Math.min(1, Number(e.target.value) || 0.2)) })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">熵阈值</span>
+                <p className="text-xs text-text-secondary">输出熵过高时触发温度回退重试</p>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  step={0.1}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.entropyThold}
+                  onChange={(e) => setSettings({ entropyThold: Math.max(0, Math.min(5, Number(e.target.value) || 2.4)) })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">对数概率阈值</span>
+                <p className="text-xs text-text-secondary">平均对数概率过低时触发重试</p>
+                <input
+                  type="number"
+                  min={-5}
+                  max={0}
+                  step={0.1}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.logprobThold}
+                  onChange={(e) => setSettings({ logprobThold: Math.max(-5, Math.min(0, Number(e.target.value) || -1)) })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">静音检测阈值</span>
+                <p className="text-xs text-text-secondary">无语音概率超过此值判定为静音</p>
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.noSpeechThold}
+                  onChange={(e) => setSettings({ noSpeechThold: Math.max(0, Math.min(1, Number(e.target.value) || 0.6)) })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">首时间戳偏移</span>
+                <p className="text-xs text-text-secondary">首个时间戳最大偏移（秒）</p>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  step={0.5}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.maxInitialTs}
+                  onChange={(e) => setSettings({ maxInitialTs: Math.max(0, Math.min(5, Number(e.target.value) || 1)) })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">重复过滤阈值</span>
+                <p className="text-xs text-text-secondary">连续相同文本超过此数量将被裁剪，0 = 不过滤</p>
+                <input
+                  type="number"
+                  min={0}
+                  max={20}
+                  step={1}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.maxRepeatFilter}
+                  onChange={(e) => setSettings({ maxRepeatFilter: Math.max(0, Math.min(20, Math.round(Number(e.target.value) || 3))) })}
+                />
+              </label>
+            </div>
+
+            <p className="text-xs text-text-secondary">
+              以上参数用于抑制 Whisper 模型幻觉（重复输出无关文本），通常保持默认即可。
+            </p>
+          </div>
+        </div>
+
         {/* 推理服务（供其他设备调用） */}
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-text-secondary">

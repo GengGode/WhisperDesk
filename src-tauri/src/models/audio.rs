@@ -89,6 +89,31 @@ pub struct TranscriptionRequest {
     pub use_gpu: Option<bool>,
     /// 远程推理服务器地址，非空时走远程推理
     pub remote_url: Option<String>,
+
+    // ── Whisper 推理参数（均为 Option，None 时使用默认值） ──
+
+    /// Greedy 采样候选数量，默认 5
+    pub best_of: Option<i32>,
+    /// 抑制空白 token，默认 true
+    pub suppress_blank: Option<bool>,
+    /// 抑制非语音 token（笑声、音乐等），默认 true
+    pub suppress_nst: Option<bool>,
+    /// 禁止前段文本作为后段上下文（防止幻觉雪崩），默认 true
+    pub no_context: Option<bool>,
+    /// 熵阈值，输出熵过高时触发温度回退重试，默认 2.4
+    pub entropy_thold: Option<f32>,
+    /// 平均对数概率阈值，默认 -1.0
+    pub logprob_thold: Option<f32>,
+    /// 无语音概率阈值，超过此值判定为静音，默认 0.6
+    pub no_speech_thold: Option<f32>,
+    /// 初始解码温度，默认 0.0
+    pub temperature: Option<f32>,
+    /// 解码失败时温度递增步长，默认 0.2
+    pub temperature_inc: Option<f32>,
+    /// 首个时间戳最大偏移，默认 1.0
+    pub max_initial_ts: Option<f32>,
+    /// 连续重复分段过滤阈值（超过此数量的连续相同文本将被裁剪），0 表示不过滤，默认 3
+    pub max_repeat_filter: Option<u32>,
 }
 
 /// 更新转录结果请求（通过 result id 定位）

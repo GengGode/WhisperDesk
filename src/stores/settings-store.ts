@@ -12,6 +12,18 @@ const defaultSettings: AppSettings = {
   remoteUrl: "",
   inferenceServerEnabled: false,
   inferenceServerPort: 3000,
+
+  bestOf: 5,
+  suppressBlank: true,
+  suppressNst: true,
+  noContext: true,
+  entropyThold: 2.4,
+  logprobThold: -1.0,
+  noSpeechThold: 0.6,
+  temperature: 0.0,
+  temperatureInc: 0.2,
+  maxInitialTs: 1.0,
+  maxRepeatFilter: 3,
 };
 
 interface SettingsState {

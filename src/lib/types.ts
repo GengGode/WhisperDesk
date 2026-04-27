@@ -73,6 +73,19 @@ export interface TranscriptionRequest {
   threads?: number;
   useGpu?: boolean;
   remoteUrl?: string;
+
+  // Whisper 推理参数
+  bestOf?: number;
+  suppressBlank?: boolean;
+  suppressNst?: boolean;
+  noContext?: boolean;
+  entropyThold?: number;
+  logprobThold?: number;
+  noSpeechThold?: number;
+  temperature?: number;
+  temperatureInc?: number;
+  maxInitialTs?: number;
+  maxRepeatFilter?: number;
 }
 
 export type ExportFormat = "txt" | "srt" | "json" | "lrc";
@@ -107,6 +120,19 @@ export interface AppSettings {
   inferenceServerEnabled: boolean;
   /** 推理服务监听端口 */
   inferenceServerPort: number;
+
+  // Whisper 推理参数
+  bestOf: number;
+  suppressBlank: boolean;
+  suppressNst: boolean;
+  noContext: boolean;
+  entropyThold: number;
+  logprobThold: number;
+  noSpeechThold: number;
+  temperature: number;
+  temperatureInc: number;
+  maxInitialTs: number;
+  maxRepeatFilter: number;
 }
 
 /** 推理服务运行状态 */

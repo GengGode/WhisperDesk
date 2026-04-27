@@ -118,6 +118,17 @@ export function TranscriptionPanel() {
                     threads: settings.threads,
                     useGpu: settings.useGpu,
                     remoteUrl: settings.remoteUrl || undefined,
+                    bestOf: settings.bestOf,
+                    suppressBlank: settings.suppressBlank,
+                    suppressNst: settings.suppressNst,
+                    noContext: settings.noContext,
+                    entropyThold: settings.entropyThold,
+                    logprobThold: settings.logprobThold,
+                    noSpeechThold: settings.noSpeechThold,
+                    temperature: settings.temperature,
+                    temperatureInc: settings.temperatureInc,
+                    maxInitialTs: settings.maxInitialTs,
+                    maxRepeatFilter: settings.maxRepeatFilter,
                   });
                   addResult(selectedFileId, payload);
                   setActiveResultIndex(0);

@@ -246,6 +246,18 @@ impl TranscriberService {
         let req_language = request.language.clone();
         let duration = decoded.duration_seconds;
 
+        let best_of = request.best_of.unwrap_or(5);
+        let suppress_blank = request.suppress_blank.unwrap_or(true);
+        let suppress_nst = request.suppress_nst.unwrap_or(true);
+        let no_context = request.no_context.unwrap_or(true);
+        let entropy_thold = request.entropy_thold.unwrap_or(2.4);
+        let logprob_thold = request.logprob_thold.unwrap_or(-1.0);
+        let no_speech_thold = request.no_speech_thold.unwrap_or(0.6);
+        let temperature = request.temperature.unwrap_or(0.0);
+        let temperature_inc = request.temperature_inc.unwrap_or(0.2);
+        let max_initial_ts = request.max_initial_ts.unwrap_or(1.0);
+        let max_repeat_filter = request.max_repeat_filter.unwrap_or(3);
+
         // 将整个 whisper 推理放到独立 OS 线程，避免阻塞 tokio async runtime，
         // 使 abort_transcription 等命令能及时被调度执行。
         let (tx, rx) = tokio::sync::oneshot::channel();
@@ -274,7 +286,7 @@ impl TranscriberService {
                 }
             };
 
-            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
+            let mut params = FullParams::new(SamplingStrategy::Greedy { best_of });
             params.set_n_threads(n_threads);
             if let Some(lang) = language.as_deref() {
                 if lang != "auto" {
@@ -285,6 +297,16 @@ impl TranscriberService {
             params.set_print_realtime(false);
             params.set_print_special(false);
             params.set_print_timestamps(false);
+
+            params.set_suppress_blank(suppress_blank);
+            params.set_suppress_nst(suppress_nst);
+            params.set_no_context(no_context);
+            params.set_entropy_thold(entropy_thold);
+            params.set_logprob_thold(logprob_thold);
+            params.set_no_speech_thold(no_speech_thold);
+            params.set_temperature(temperature);
+            params.set_temperature_inc(temperature_inc);
+            params.set_max_initial_ts(max_initial_ts);
 
             let pcb = progress_cb.clone();
             let lcb = log_cb.clone();
@@ -338,11 +360,43 @@ impl TranscriberService {
                         return;
                     }
                 };
+                if text.is_empty() {
+                    continue;
+                }
                 segments.push(TranscriptionSegment {
                     start: seg.start_timestamp() as f64 / 100.0,
                     end: seg.end_timestamp() as f64 / 100.0,
                     text,
                 });
+            }
+
+            // 后处理：检测并过滤连续重复的幻觉分段
+            if max_repeat_filter > 0 {
+                let pre_filter = segments.len();
+                let mut filtered = Vec::with_capacity(pre_filter);
+                let mut repeat_count = 0u32;
+                for seg in segments {
+                    if let Some(prev) = filtered.last() {
+                        let prev: &TranscriptionSegment = prev;
+                        if seg.text == prev.text {
+                            repeat_count += 1;
+                            if repeat_count >= max_repeat_filter {
+                                continue;
+                            }
+                        } else {
+                            repeat_count = 0;
+                        }
+                    }
+                    filtered.push(seg);
+                }
+                let removed = pre_filter - filtered.len();
+                if removed > 0 {
+                    log_cb(&format!(
+                        "[推理] 后处理：检测到 {removed} 个连续重复幻觉分段已过滤（共 {pre_filter} → {}）",
+                        filtered.len()
+                    ));
+                }
+                segments = filtered;
             }
 
             progress_cb(1.0, "转录完成");
