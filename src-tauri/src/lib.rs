@@ -14,6 +14,8 @@ pub fn run() {
             commands::files::select_audio_file,
             commands::files::import_audio_folder,
             commands::files::list_audio_files,
+            commands::files::delete_audio_file,
+            commands::files::import_audio_files,
             commands::whisper::transcribe_audio,
             commands::whisper::get_transcription_results,
             commands::whisper::ensure_model,

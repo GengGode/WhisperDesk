@@ -192,6 +192,17 @@ impl FileIndexService {
         Ok(out)
     }
 
+    /// 从索引中删除音频文件及其关联的转录结果（不删除磁盘文件）
+    pub fn delete_audio(&self, id: &str) -> Result<(), AppError> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute(
+            "DELETE FROM transcription_results WHERE audio_file_id = ?",
+            params![id],
+        )?;
+        conn.execute("DELETE FROM audio_files WHERE id = ?", params![id])?;
+        Ok(())
+    }
+
     /// 保存转录结果（每次转录追加一条新记录）
     pub fn save_transcription_result(&self, result: &TranscriptionResult) -> Result<(), AppError> {
         let conn = Connection::open(&self.db_path)?;

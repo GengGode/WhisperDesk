@@ -34,6 +34,14 @@ export async function listAudioFiles(): Promise<AudioFile[]> {
   return invoke<AudioFile[]>("list_audio_files");
 }
 
+export async function deleteAudioFile(id: string): Promise<void> {
+  return invoke<void>("delete_audio_file", { id });
+}
+
+export async function importAudioFiles(paths: string[]): Promise<AudioFile[]> {
+  return invoke<AudioFile[]>("import_audio_files", { paths });
+}
+
 export async function transcribeAudio(
   request: TranscriptionRequest,
 ): Promise<TranscriptionResult> {

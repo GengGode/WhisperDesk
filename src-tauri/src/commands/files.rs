@@ -92,6 +92,66 @@ pub fn list_audio_files() -> Result<Vec<AudioFileMeta>, AppError> {
     Ok(list)
 }
 
+#[tauri::command]
+pub fn delete_audio_file(id: String) -> Result<(), AppError> {
+    println!("[文件] 删除音频: id={id}");
+    let service = FileIndexService::portable()?;
+    service.init()?;
+    service.delete_audio(&id)?;
+    println!("[文件] 删除成功: id={id}");
+    Ok(())
+}
+
+#[tauri::command]
+pub fn import_audio_files(app: AppHandle, paths: Vec<String>) -> Result<Vec<AudioFileMeta>, AppError> {
+    let service = FileIndexService::portable()?;
+    service.init()?;
+
+    let audio_paths: Vec<PathBuf> = paths
+        .into_iter()
+        .flat_map(|p| {
+            let path = PathBuf::from(&p);
+            if path.is_dir() {
+                WalkDir::new(&path)
+                    .into_iter()
+                    .filter_map(Result::ok)
+                    .filter(|e| e.file_type().is_file() && is_audio_file(e.path()))
+                    .map(|e| e.into_path())
+                    .collect::<Vec<_>>()
+            } else if path.is_file() && is_audio_file(&path) {
+                vec![path]
+            } else {
+                vec![]
+            }
+        })
+        .collect();
+
+    let total = audio_paths.len();
+    let mut imported = Vec::new();
+
+    for (i, path) in audio_paths.iter().enumerate() {
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let _ = app.emit(
+            "import-folder-progress",
+            ImportFolderProgress {
+                total,
+                current: i + 1,
+                current_name: name,
+            },
+        );
+
+        if let Ok(file) = service.import_audio_file(path) {
+            imported.push(file);
+        }
+    }
+
+    Ok(imported)
+}
+
 fn is_audio_file(path: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
         return false;
