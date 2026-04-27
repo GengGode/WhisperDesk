@@ -118,7 +118,13 @@ async fn transcribe(
             let _ = mtx.try_send(Ok(Event::default().event("model_progress").data(d.to_string())));
         };
 
-        match transcriber.transcribe(on_progress, on_model_dl, &request).await {
+        let ltx = tx.clone();
+        let on_log = move |msg: &str| {
+            let d = serde_json::json!({ "message": msg });
+            let _ = ltx.try_send(Ok(Event::default().event("log").data(d.to_string())));
+        };
+
+        match transcriber.transcribe(on_progress, on_model_dl, on_log, &request).await {
             Ok(result) => {
                 let json = serde_json::to_string(&result).unwrap_or_default();
                 let _ = tx.send(Ok(Event::default().event("complete").data(json))).await;

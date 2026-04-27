@@ -21,12 +21,16 @@ export function TranscriptionPanel() {
   const setResults = useTranscriptionStore((s) => s.setResults);
   const settings = useSettingsStore((s) => s.settings);
   const modelDownload = useTranscriptionStore((s) => s.modelDownload);
+  const logs = useTranscriptionStore((s) => s.logs);
+  const clearLogs = useTranscriptionStore((s) => s.clearLogs);
   const [error, setError] = useState<string | null>(null);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
+  const [showLogs, setShowLogs] = useState(true);
 
   const [seekTime, setSeekTime] = useState(0);
   const seekVersionRef = useRef(0);
   const [seekVersion, setSeekVersion] = useState(0);
+  const logEndRef = useRef<HTMLDivElement>(null);
 
   const selectedFile = files.find((f) => f.id === selectedFileId);
   const allResults = selectedFileId ? results.get(selectedFileId) ?? [] : [];
@@ -46,6 +50,10 @@ export function TranscriptionPanel() {
       if (stored.length > 0) setResults(selectedFileId, stored);
     });
   }, [selectedFileId, selectedFile?.transcriptionStatus, results, setResults]);
+
+  useEffect(() => {
+    if (showLogs) logEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [logs, showLogs]);
 
   const handleSeekToSegment = useCallback((index: number) => {
     if (!result) return;
@@ -89,6 +97,7 @@ export function TranscriptionPanel() {
               language: settings.language,
               threads: settings.threads,
             });
+            clearLogs();
             updateFile(selectedFileId, { transcriptionStatus: "transcribing" });
             try {
               const payload = await transcribeAudio({
@@ -164,6 +173,57 @@ export function TranscriptionPanel() {
                 style={{ width: `${activeTask.progress * 100}%` }}
               />
             </div>
+          </div>
+        )}
+
+        {logs.length > 0 && (
+          <div className="rounded-lg border border-border bg-surface-secondary">
+            <button
+              className="flex w-full items-center justify-between px-3 py-1.5 text-xs text-text-secondary hover:text-text-primary"
+              onClick={() => setShowLogs((v) => !v)}
+            >
+              <span className="font-medium">
+                引擎日志 ({logs.length})
+              </span>
+              <span className="flex items-center gap-2">
+                <span
+                  className="hover:text-red-500"
+                  role="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    clearLogs();
+                  }}
+                >
+                  清空
+                </span>
+                <svg
+                  className={`h-3 w-3 transition-transform ${showLogs ? "rotate-180" : ""}`}
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M19 9l-7 7-7-7"
+                  />
+                </svg>
+              </span>
+            </button>
+            {showLogs && (
+              <div className="max-h-40 overflow-y-auto border-t border-border px-3 py-2 font-mono text-[11px] leading-relaxed">
+                {logs.map((log, i) => (
+                  <div key={i} className="whitespace-pre-wrap text-text-secondary">
+                    <span className="select-none text-text-secondary/40">
+                      {new Date(log.timestamp).toLocaleTimeString("zh-CN")}
+                    </span>{" "}
+                    {log.message}
+                  </div>
+                ))}
+                <div ref={logEndRef} />
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -65,6 +65,13 @@ pub struct TranscriptionProgressPayload {
     pub current_segment: Option<String>,
 }
 
+/// Whisper 引擎日志事件（转发到前端界面展示）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperLogPayload {
+    pub message: String,
+}
+
 /// 转录请求参数
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

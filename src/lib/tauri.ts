@@ -72,6 +72,14 @@ export function listenModelDownloadProgress(
   );
 }
 
+export function listenWhisperLog(
+  cb: (payload: { message: string }) => void,
+) {
+  return listen<{ message: string }>("whisper-log", (event) => {
+    cb(event.payload);
+  });
+}
+
 export interface ImportFolderProgress {
   total: number;
   current: number;

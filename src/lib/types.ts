@@ -55,6 +55,12 @@ export interface TranscriptionProgress {
   currentSegment?: string;
 }
 
+/** Whisper 引擎日志条目 */
+export interface WhisperLog {
+  message: string;
+  timestamp: number;
+}
+
 export interface TranscriptionRequest {
   audioFileId: string;
   audioPath: string;

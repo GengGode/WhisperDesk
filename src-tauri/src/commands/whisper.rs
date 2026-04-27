@@ -6,7 +6,7 @@ use tauri_plugin_opener::OpenerExt;
 
 use crate::models::audio::{
     ExportFormat, ExportRequest, TranscriptionProgressPayload, TranscriptionRequest,
-    TranscriptionResult, UpdateTranscriptionRequest,
+    TranscriptionResult, UpdateTranscriptionRequest, WhisperLogPayload,
 };
 use crate::models::error::AppError;
 use crate::services::cuda::CudaInfo;
@@ -41,33 +41,56 @@ fn make_model_dl_cb(window: &Window) -> impl Fn(&str, f32) + Clone + Send + 'sta
     }
 }
 
+/// 构造 whisper 日志回调闭包（Window → Tauri event）
+fn make_log_cb(window: &Window) -> impl Fn(&str) + Clone + Send + 'static {
+    let w = window.clone();
+    move |msg: &str| {
+        let _ = w.emit(
+            "whisper-log",
+            WhisperLogPayload {
+                message: msg.to_string(),
+            },
+        );
+    }
+}
+
 #[tauri::command]
 pub async fn transcribe_audio(
     window: Window,
     request: TranscriptionRequest,
 ) -> Result<TranscriptionResult, AppError> {
-    println!("[转录] 收到转录请求: file_id={}, path={}, model={}", request.audio_file_id, request.audio_path, request.model_name);
+    let log = make_log_cb(&window);
+    log(&format!(
+        "[转录] 收到转录请求: file_id={}, path={}, model={}",
+        request.audio_file_id, request.audio_path, request.model_name
+    ));
     let index_service = FileIndexService::portable()?;
     index_service.init()?;
 
     let result = if let Some(url) = request.remote_url.as_deref().filter(|u| !u.is_empty()) {
-        println!("[转录] 使用远程推理: {url}");
-        transcribe_via_remote(&window, url, &request).await?
+        log(&format!("[转录] 使用远程推理: {url}"));
+        let mut r = transcribe_via_remote(&window, url, &request).await?;
+        r.audio_file_id = request.audio_file_id.clone();
+        r
     } else {
         let transcriber = TranscriberService::portable()?;
-        println!("[转录] 开始本地推理...");
+        log("[转录] 开始本地推理...");
         transcriber
             .transcribe(
                 make_progress_cb(&window, &request.audio_file_id),
                 make_model_dl_cb(&window),
+                log.clone(),
                 &request,
             )
             .await?
     };
 
-    println!("[转录] 推理完成，共 {} 个分段", result.segments.len());
+    log(&format!(
+        "[转录] 推理完成，共 {} 个分段",
+        result.segments.len()
+    ));
     index_service.save_transcription_result(&result)?;
-    println!("[转录] 结果已保存到数据库");
+    log("[转录] 结果已保存到数据库");
     Ok(result)
 }
 
@@ -97,9 +120,6 @@ async fn transcribe_via_remote(
     }
     if let Some(t) = request.threads {
         form = form.text("threads", t.to_string());
-    }
-    if let Some(gpu) = request.use_gpu {
-        form = form.text("use_gpu", gpu.to_string());
     }
 
     let url = format!("{}/api/transcribe", remote_url.trim_end_matches('/'));
@@ -189,7 +209,9 @@ pub async fn ensure_model(
     model_name: String,
 ) -> Result<String, AppError> {
     let service = TranscriberService::portable()?;
-    let path = service.ensure_model(make_model_dl_cb(&window), &model_name).await?;
+    let path = service
+        .ensure_model(make_model_dl_cb(&window), make_log_cb(&window), &model_name)
+        .await?;
     Ok(path.to_string_lossy().to_string())
 }
 

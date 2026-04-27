@@ -9,6 +9,7 @@ import {
   listAudioFiles,
   listenModelDownloadProgress,
   listenTranscriptionProgress,
+  listenWhisperLog,
 } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -21,6 +22,7 @@ function App() {
   const setFiles = useAudioStore((s) => s.setFiles);
   const setActiveTask = useTranscriptionStore((s) => s.setActiveTask);
   const setModelDownload = useTranscriptionStore((s) => s.setModelDownload);
+  const addLog = useTranscriptionStore((s) => s.addLog);
   const initCuda = useSettingsStore((s) => s.initCuda);
 
   useEffect(() => {
@@ -43,12 +45,16 @@ function App() {
       console.log("[事件] 模型下载进度", payload);
       setModelDownload(payload.progress >= 1 ? null : payload);
     });
+    const unlistenLog = listenWhisperLog((payload) => {
+      addLog(payload.message);
+    });
 
     return () => {
       void unlistenProgress.then((off) => off());
       void unlistenModel.then((off) => off());
+      void unlistenLog.then((off) => off());
     };
-  }, [initCuda, setActiveTask, setFiles, setModelDownload]);
+  }, [initCuda, addLog, setActiveTask, setFiles, setModelDownload]);
 
   return (
     <div className="flex h-screen w-screen overflow-hidden">

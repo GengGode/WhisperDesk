@@ -3,7 +3,9 @@ use std::path::{Path, PathBuf};
 use reqwest::Client;
 use tokio::io::AsyncWriteExt;
 #[cfg(feature = "whisper-rs-backend")]
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use whisper_rs::{
+    install_logging_hooks, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
+};
 
 use serde::Serialize;
 
@@ -46,13 +48,15 @@ impl TranscriberService {
 
     /// 确保模型文件已下载，不足则自动下载。
     /// `on_model_progress(model_name, progress_0_to_1)` 在下载过程中回调。
-    pub async fn ensure_model<M>(
+    pub async fn ensure_model<M, L>(
         &self,
         on_model_progress: M,
+        on_log: L,
         model_name: &str,
     ) -> Result<PathBuf, AppError>
     where
         M: Fn(&str, f32) + Clone + Send + 'static,
+        L: Fn(&str) + Clone + Send + 'static,
     {
         let path = self.model_path(model_name);
         if path.exists() {
@@ -60,27 +64,33 @@ impl TranscriberService {
             if size >= Self::MIN_MODEL_BYTES {
                 return Ok(path);
             }
-            println!("[模型] 已有文件 {} 过小 ({size} B)，删除后重新下载", path.display());
+            on_log(&format!(
+                "[模型] 已有文件 {} 过小 ({size} B)，删除后重新下载",
+                path.display()
+            ));
             let _ = std::fs::remove_file(&path);
         }
 
-        self.download_model(on_model_progress, model_name, &path).await?;
+        self.download_model(on_model_progress, on_log, model_name, &path)
+            .await?;
         Ok(path)
     }
 
-    async fn download_model<M>(
+    async fn download_model<M, L>(
         &self,
         on_model_progress: M,
+        on_log: L,
         model_name: &str,
         target: &Path,
     ) -> Result<(), AppError>
     where
         M: Fn(&str, f32) + Send + 'static,
+        L: Fn(&str) + Send + 'static,
     {
         let url = format!(
             "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin"
         );
-        println!("[模型] 开始下载: {url}");
+        on_log(&format!("[模型] 开始下载: {url}"));
 
         let client = Client::builder()
             .user_agent("WhisperDesk/0.1")
@@ -102,7 +112,7 @@ impl TranscriberService {
         }
 
         let total = resp.content_length().unwrap_or(0);
-        println!("[模型] 文件大小: {total} bytes");
+        on_log(&format!("[模型] 文件大小: {total} bytes"));
         let mut downloaded: u64 = 0;
         let mut stream = resp;
 
@@ -142,7 +152,10 @@ impl TranscriberService {
             )));
         }
 
-        println!("[模型] 下载完成: {} ({final_size} bytes)", target.display());
+        on_log(&format!(
+            "[模型] 下载完成: {} ({final_size} bytes)",
+            target.display()
+        ));
         Ok(())
     }
 
@@ -172,20 +185,24 @@ impl TranscriberService {
     /// 执行 whisper 推理。
     /// - `on_progress(progress_0_to_1, message)` 推理进度回调
     /// - `on_model_progress(model_name, progress_0_to_1)` 模型下载进度回调
-    pub async fn transcribe<P, M>(
+    /// - `on_log(message)` 日志回调，转发到前端界面
+    pub async fn transcribe<P, M, L>(
         &self,
         on_progress: P,
         on_model_progress: M,
+        on_log: L,
         request: &TranscriptionRequest,
     ) -> Result<TranscriptionResult, AppError>
     where
         P: Fn(f32, &str) + Clone + Send + 'static,
         M: Fn(&str, f32) + Clone + Send + 'static,
+        L: Fn(&str) + Clone + Send + 'static,
     {
         #[cfg(not(feature = "whisper-rs-backend"))]
         {
             on_progress(1.0, "未启用 whisper-rs-backend 功能");
             let _ = on_model_progress;
+            let _ = on_log;
             return Err(AppError::Transcription(
                 "当前构建未启用 whisper-rs-backend。若需真实推理，请安装 LLVM/Clang 并使用 `cargo check --features whisper-rs-backend` 构建。".to_string(),
             ));
@@ -193,22 +210,30 @@ impl TranscriberService {
 
         #[cfg(feature = "whisper-rs-backend")]
         {
-        let model_path = self.ensure_model(on_model_progress, &request.model_name).await?;
+        install_logging_hooks();
+
+        let model_path = self
+            .ensure_model(on_model_progress, on_log.clone(), &request.model_name)
+            .await?;
         let decoded = decode_to_16k_mono(Path::new(&request.audio_path))?;
 
+        on_log("[推理] 音频解码完成");
         on_progress(0.05, "音频解码完成");
 
         let requested_gpu = request.use_gpu.unwrap_or(true);
         let cuda_ok = super::cuda::is_cuda_available();
         let use_gpu = requested_gpu && cuda_ok;
         if requested_gpu && !cuda_ok {
-            println!("[推理] 用户请求 GPU 但 CUDA 不可用，自动回退 CPU");
+            on_log("[推理] 用户请求 GPU 但 CUDA 不可用，自动回退 CPU");
             on_progress(0.03, "CUDA 不可用，使用 CPU 推理");
         }
         let mut ctx_params = WhisperContextParameters::default();
         ctx_params.use_gpu = use_gpu;
-        println!("[推理] use_gpu = {use_gpu} (requested={requested_gpu}, cuda_available={cuda_ok})");
+        on_log(&format!(
+            "[推理] use_gpu = {use_gpu} (requested={requested_gpu}, cuda_available={cuda_ok})"
+        ));
 
+        on_log("[推理] 加载模型...");
         let ctx = WhisperContext::new_with_params(
             model_path
                 .to_str()
@@ -216,6 +241,7 @@ impl TranscriberService {
             ctx_params,
         )
         .map_err(|e| AppError::Transcription(format!("加载模型失败: {e}")))?;
+        on_log("[推理] 模型加载完成");
 
         let mut state = ctx
             .create_state()
@@ -233,18 +259,21 @@ impl TranscriberService {
         params.set_print_special(false);
         params.set_print_timestamps(false);
 
-        // 通过回调在推理过程中实时上报进度（5% ~ 95%）
         let cb = on_progress.clone();
+        let log_cb = on_log.clone();
         params.set_progress_callback_safe(move |pct: i32| {
             let mapped = 0.05 + (pct as f32 / 100.0) * 0.90;
             cb(mapped, &format!("推理中 {pct}%"));
+            log_cb(&format!("[推理] 进度 {pct}%"));
         });
 
+        on_log("[推理] 开始 whisper 推理...");
         state
             .full(params, &decoded.samples_16k_mono)
             .map_err(|e| AppError::Transcription(format!("Whisper 推理失败: {e}")))?;
 
         let n_segments = state.full_n_segments();
+        on_log(&format!("[推理] 推理完成，共 {n_segments} 个分段"));
 
         let mut segments = Vec::with_capacity(n_segments as usize);
         for i in 0..n_segments {
