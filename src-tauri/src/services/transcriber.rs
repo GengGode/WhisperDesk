@@ -246,17 +246,26 @@ impl TranscriberService {
         let req_language = request.language.clone();
         let duration = decoded.duration_seconds;
 
-        let best_of = request.best_of.unwrap_or(5);
+        let best_of = request.best_of.unwrap_or(5).clamp(1, 8);
         let suppress_blank = request.suppress_blank.unwrap_or(true);
         let suppress_nst = request.suppress_nst.unwrap_or(true);
         let no_context = request.no_context.unwrap_or(true);
-        let entropy_thold = request.entropy_thold.unwrap_or(2.4);
-        let logprob_thold = request.logprob_thold.unwrap_or(-1.0);
-        let no_speech_thold = request.no_speech_thold.unwrap_or(0.6);
-        let temperature = request.temperature.unwrap_or(0.0);
-        let temperature_inc = request.temperature_inc.unwrap_or(0.2);
-        let max_initial_ts = request.max_initial_ts.unwrap_or(1.0);
+        let entropy_thold = request.entropy_thold.unwrap_or(2.4).clamp(0.0, 10.0);
+        let logprob_thold = request.logprob_thold.unwrap_or(-1.0).clamp(-5.0, 0.0);
+        let no_speech_thold = request.no_speech_thold.unwrap_or(0.6).clamp(0.0, 1.0);
+        let temperature = request.temperature.unwrap_or(0.0).clamp(0.0, 1.0);
+        let temperature_inc = request.temperature_inc.unwrap_or(0.2).clamp(0.0, 1.0);
+        let max_initial_ts = request.max_initial_ts.unwrap_or(1.0).clamp(0.0, 1.0);
         let max_repeat_filter = request.max_repeat_filter.unwrap_or(3);
+
+        on_log(&format!(
+            "[推理] 参数: best_of={best_of}, threads={n_threads}, gpu={use_gpu}, \
+             suppress_blank={suppress_blank}, suppress_nst={suppress_nst}, no_context={no_context}, \
+             entropy={entropy_thold}, logprob={logprob_thold}, no_speech={no_speech_thold}, \
+             temp={temperature}, temp_inc={temperature_inc}, max_init_ts={max_initial_ts}, \
+             samples={}, lang={:?}",
+            samples.len(), language
+        ));
 
         // 将整个 whisper 推理放到独立 OS 线程，避免阻塞 tokio async runtime，
         // 使 abort_transcription 等命令能及时被调度执行。
