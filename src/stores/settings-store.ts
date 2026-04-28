@@ -12,6 +12,7 @@ const defaultSettings: AppSettings = {
   remoteUrl: "",
   inferenceServerEnabled: false,
   inferenceServerPort: 3000,
+  silentStart: false,
 
   bestOf: 5,
   suppressBlank: true,

@@ -11,6 +11,7 @@ import {
   stopInferenceServer,
   testRemoteConnection,
 } from "@/lib/tauri";
+import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import type { DashboardSnapshot, ServerStatus, WhisperModel } from "@/lib/types";
@@ -53,6 +54,8 @@ export function SettingsPanel() {
   const [remoteTestResult, setRemoteTestResult] = useState<string | null>(null);
   const [remoteTesting, setRemoteTesting] = useState(false);
 
+  const [autoStartEnabled, setAutoStartEnabled] = useState(false);
+
   const [dashboard, setDashboard] = useState<DashboardSnapshot | null>(null);
   const dashPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
@@ -94,6 +97,19 @@ export function SettingsPanel() {
     dashPollRef.current = setInterval(poll, 2000);
     return () => clearInterval(dashPollRef.current);
   }, [serverStatus.running]);
+
+  useEffect(() => {
+    isEnabled().then(setAutoStartEnabled).catch(() => {});
+  }, []);
+
+  const handleAutoStartToggle = async (checked: boolean) => {
+    try {
+      if (checked) await enable(); else await disable();
+      setAutoStartEnabled(await isEnabled());
+    } catch (e) {
+      setError(String(e));
+    }
+  };
 
   const refreshModels = useCallback(async () => {
     try {
@@ -186,6 +202,39 @@ export function SettingsPanel() {
       </header>
 
       <div className="flex-1 space-y-6 overflow-y-auto p-6">
+        {/* 通用 */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-text-secondary">通用</h3>
+
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <label className="flex items-center justify-between gap-2">
+              <div>
+                <span className="text-sm font-medium">开机自启</span>
+                <p className="text-xs text-text-secondary">系统启动时自动运行 WhisperDesk</p>
+              </div>
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border accent-primary"
+                checked={autoStartEnabled}
+                onChange={(e) => handleAutoStartToggle(e.target.checked)}
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-2">
+              <div>
+                <span className="text-sm font-medium">静默启动</span>
+                <p className="text-xs text-text-secondary">启动时最小化到系统托盘，不显示主窗口</p>
+              </div>
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border accent-primary"
+                checked={settings.silentStart}
+                onChange={(e) => setSettings({ silentStart: e.target.checked })}
+              />
+            </label>
+          </div>
+        </div>
+
         {/* 转录参数 */}
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-text-secondary">
@@ -447,6 +496,19 @@ export function SettingsPanel() {
                 {serverLoading ? "处理中..." : serverStatus.running ? "停止服务" : "启动服务"}
               </button>
             </div>
+
+            <label className="flex items-center justify-between gap-2">
+              <div>
+                <span className="text-sm font-medium">随应用启动</span>
+                <p className="text-xs text-text-secondary">开启后每次启动应用时自动开启推理服务</p>
+              </div>
+              <input
+                type="checkbox"
+                className="h-4 w-4 rounded border-border accent-primary"
+                checked={settings.inferenceServerEnabled}
+                onChange={(e) => setSettings({ inferenceServerEnabled: e.target.checked })}
+              />
+            </label>
 
             <div className="flex items-center gap-2 text-xs">
               <span

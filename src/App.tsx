@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "@/components/ui/sidebar";
 import { SidebarItem } from "@/components/ui/sidebar-item";
 import { FileManager } from "@/components/file-manager";
@@ -11,6 +12,7 @@ import {
   listenModelDownloadProgress,
   listenTranscriptionProgress,
   listenWhisperLog,
+  startInferenceServer,
 } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -31,8 +33,20 @@ function App() {
   useTranscriptionQueue();
 
   useEffect(() => {
+    const { silentStart, inferenceServerEnabled, inferenceServerPort } =
+      useSettingsStore.getState().settings;
+    if (!silentStart) {
+      getCurrentWindow().show();
+    }
+
     console.log("[App] 初始化：检测 CUDA");
     void initCuda();
+    if (inferenceServerEnabled) {
+      console.log("[App] 自动启动推理服务，端口:", inferenceServerPort);
+      startInferenceServer(inferenceServerPort).catch((err) =>
+        console.error("[App] 自动启动推理服务失败", err)
+      );
+    }
 
     console.log("[App] 初始化：加载音频列表");
     void listAudioFiles()

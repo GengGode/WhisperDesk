@@ -126,6 +126,8 @@ export interface AppSettings {
   inferenceServerEnabled: boolean;
   /** 推理服务监听端口 */
   inferenceServerPort: number;
+  /** 静默启动：启动时最小化到系统托盘 */
+  silentStart: boolean;
 
   // Whisper 推理参数
   bestOf: number;
