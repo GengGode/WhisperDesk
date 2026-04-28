@@ -1,2 +1,5 @@
 [env]
 LIBCLANG_PATH = { value = "../.env/llvm/bin", relative = true }
+# 关闭 native 编译，让 ggml CUDA 后端生成包含 PTX 的通用产物，
+# 使编译结果可在不同架构的 GPU 上通过 JIT 运行（如从 Ampere 编译后在 Blackwell 上运行）
+GGML_NATIVE = "OFF"
