@@ -4,10 +4,11 @@ use std::path::Path;
 use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::errors::Error as SymphoniaError;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+use symphonia::core::units::Time;
 use symphonia::default::{get_codecs, get_probe};
 
 use crate::models::error::AppError;
@@ -151,6 +152,145 @@ pub fn decode_to_16k_mono(path: &Path) -> Result<DecodedAudio, AppError> {
     let mono = to_mono(&interleaved, channels);
     let resampled = resample_linear(&mono, sample_rate, 16_000);
     let duration_seconds = mono.len() as f64 / sample_rate as f64;
+
+    Ok(DecodedAudio {
+        samples_16k_mono: resampled,
+        source_sample_rate: sample_rate,
+        source_channels: channels,
+        duration_seconds,
+    })
+}
+
+/// 区间解码：利用 symphonia seek 跳到 start_seconds 附近，只解码到 end_seconds，
+/// 避免大文件部分转录时解码整段音频浪费内存和时间。
+pub fn decode_range_to_16k_mono(
+    path: &Path,
+    start_seconds: f64,
+    end_seconds: f64,
+) -> Result<DecodedAudio, AppError> {
+    let file = File::open(path).map_err(|e| AppError::Audio(format!("打开音频失败: {e}")))?;
+    let mss = MediaSourceStream::new(Box::new(file), Default::default());
+
+    let mut hint = Hint::new();
+    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+        hint.with_extension(ext);
+    }
+
+    let probed = get_probe()
+        .format(
+            &hint,
+            mss,
+            &FormatOptions::default(),
+            &MetadataOptions::default(),
+        )
+        .map_err(|e| AppError::Audio(format!("探测音频格式失败: {e}")))?;
+
+    let mut format = probed.format;
+    let track = format
+        .default_track()
+        .ok_or_else(|| AppError::Audio("未找到默认音轨".to_string()))?;
+
+    let sample_rate = track
+        .codec_params
+        .sample_rate
+        .ok_or_else(|| AppError::Audio("无法读取采样率".to_string()))?;
+
+    let channels = track
+        .codec_params
+        .channels
+        .map(|c| c.count())
+        .ok_or_else(|| AppError::Audio("无法读取声道数".to_string()))?;
+
+    let track_id = track.id;
+
+    let mut decoder = get_codecs()
+        .make(&track.codec_params, &DecoderOptions::default())
+        .map_err(|e| AppError::Audio(format!("创建解码器失败: {e}")))?;
+
+    // seek 到起始位置（Coarse 模式跳到最近关键帧）
+    if start_seconds > 0.0 {
+        let seek_to = SeekTo::Time {
+            time: Time::new(start_seconds as u64, start_seconds.fract()),
+            track_id: Some(track_id),
+        };
+        format.seek(SeekMode::Coarse, seek_to)
+            .map_err(|e| AppError::Audio(format!("音频 seek 失败: {e}")))?;
+    }
+
+    let range_duration = end_seconds - start_seconds;
+    // 预估需要的帧数上限（多 10% 缓冲以补偿 Coarse seek 的偏差，后续精确裁剪）
+    let max_frames = ((range_duration * sample_rate as f64) * 1.1) as usize;
+    let start_frame = (start_seconds * sample_rate as f64) as usize;
+    let end_frame = (end_seconds * sample_rate as f64) as usize;
+
+    let mut interleaved: Vec<f32> = Vec::with_capacity(max_frames * channels);
+    let mut total_frames: usize = 0;
+    // Coarse seek 可能落在 start_seconds 之前，需要记录实际起始帧偏移
+    let mut first_packet_ts: Option<usize> = None;
+
+    loop {
+        let packet = match format.next_packet() {
+            Ok(p) => p,
+            Err(SymphoniaError::IoError(_)) => break,
+            Err(SymphoniaError::ResetRequired) => {
+                return Err(AppError::Audio("音频流重置未实现".to_string()));
+            }
+            Err(e) => return Err(AppError::Audio(format!("读取音频包失败: {e}"))),
+        };
+
+        if packet.track_id() != track_id {
+            continue;
+        }
+
+        // 记录 seek 后首个 packet 的时间戳，用于计算精确的帧偏移
+        if first_packet_ts.is_none() {
+            let ts = packet.ts() as usize;
+            first_packet_ts = Some(ts);
+        }
+
+        let decoded = match decoder.decode(&packet) {
+            Ok(audio_buf) => audio_buf,
+            Err(SymphoniaError::DecodeError(_)) => continue,
+            Err(e) => return Err(AppError::Audio(format!("解码失败: {e}"))),
+        };
+
+        let mut sample_buf =
+            SampleBuffer::<f32>::new(decoded.capacity() as u64, *decoded.spec());
+        sample_buf.copy_interleaved_ref(decoded);
+        interleaved.extend_from_slice(sample_buf.samples());
+
+        total_frames += sample_buf.samples().len() / channels.max(1);
+
+        // 已解码足够帧数后提前退出
+        let actual_start = first_packet_ts.unwrap_or(0);
+        if actual_start + total_frames >= end_frame + sample_rate as usize {
+            break;
+        }
+    }
+
+    if interleaved.is_empty() {
+        return Err(AppError::Audio("区间音频样本为空".to_string()));
+    }
+
+    let mono = to_mono(&interleaved, channels);
+
+    // 精确裁剪：Coarse seek 可能返回 start_seconds 之前的数据
+    let actual_start_frame = first_packet_ts.unwrap_or(0);
+    let trim_start = if actual_start_frame < start_frame {
+        start_frame - actual_start_frame
+    } else {
+        0
+    };
+    let trim_end = (end_frame.saturating_sub(actual_start_frame)).min(mono.len());
+    let trim_start = trim_start.min(trim_end);
+    let trimmed = &mono[trim_start..trim_end];
+
+    if trimmed.is_empty() {
+        return Err(AppError::Audio("区间裁剪后音频样本为空".to_string()));
+    }
+
+    let resampled = resample_linear(trimmed, sample_rate, 16_000);
+    let duration_seconds = trimmed.len() as f64 / sample_rate as f64;
 
     Ok(DecodedAudio {
         samples_16k_mono: resampled,
@@ -333,6 +473,60 @@ fn merge_peaks(source: &[f32], target_count: usize) -> Vec<f32> {
     }
 
     result
+}
+
+/// 将 f32 PCM 样本写为标准 16-bit PCM WAV 文件（手写 44 字节 RIFF 头，无需额外依赖）
+pub fn write_wav_16bit(path: &Path, samples: &[f32], sample_rate: u32) -> Result<(), AppError> {
+    use std::io::Write;
+
+    let num_channels: u16 = 1;
+    let bits_per_sample: u16 = 16;
+    let byte_rate = sample_rate * u32::from(num_channels) * u32::from(bits_per_sample) / 8;
+    let block_align = num_channels * bits_per_sample / 8;
+    let data_size = (samples.len() * 2) as u32;
+    let file_size = 36 + data_size;
+
+    let mut file = File::create(path)
+        .map_err(|e| AppError::Audio(format!("创建 WAV 文件失败: {e}")))?;
+
+    // RIFF header
+    file.write_all(b"RIFF").map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&file_size.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(b"WAVE").map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+
+    // fmt chunk
+    file.write_all(b"fmt ").map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&16u32.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&1u16.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?; // PCM
+    file.write_all(&num_channels.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&sample_rate.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&byte_rate.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&block_align.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&bits_per_sample.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+
+    // data chunk
+    file.write_all(b"data").map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    file.write_all(&data_size.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+
+    // f32 → i16 PCM
+    for &s in samples {
+        let clamped = s.clamp(-1.0, 1.0);
+        let i16_val = (clamped * 32767.0) as i16;
+        file.write_all(&i16_val.to_le_bytes()).map_err(|e| AppError::Audio(format!("写入 WAV 失败: {e}")))?;
+    }
+
+    Ok(())
+}
+
+/// 导出音频文件指定区间为 16kHz 单声道 16-bit PCM WAV，用于远程转录时客户端切片上传
+pub fn export_wav_clip(
+    source_path: &Path,
+    start_seconds: f64,
+    end_seconds: f64,
+    output_path: &Path,
+) -> Result<(), AppError> {
+    let decoded = decode_range_to_16k_mono(source_path, start_seconds, end_seconds)?;
+    write_wav_16bit(output_path, &decoded.samples_16k_mono, 16_000)
 }
 
 fn resample_linear(samples: &[f32], src_rate: u32, target_rate: u32) -> Vec<f32> {

@@ -178,6 +178,8 @@ async fn transcribe(
         temperature_inc: Some(cfg.temperature_inc),
         max_initial_ts: Some(cfg.max_initial_ts),
         max_repeat_filter: Some(cfg.max_repeat_filter),
+        start_seconds: None,
+        end_seconds: None,
     };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);

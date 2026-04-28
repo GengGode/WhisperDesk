@@ -88,6 +88,10 @@ export interface TranscriptionRequest {
   temperatureInc?: number;
   maxInitialTs?: number;
   maxRepeatFilter?: number;
+
+  // 区间转录
+  startSeconds?: number;
+  endSeconds?: number;
 }
 
 export type ExportFormat = "txt" | "srt" | "json" | "lrc";

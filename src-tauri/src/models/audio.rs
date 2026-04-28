@@ -117,6 +117,13 @@ pub struct TranscriptionRequest {
     pub max_initial_ts: Option<f32>,
     /// 连续重复分段过滤阈值（超过此数量的连续相同文本将被裁剪），0 表示不过滤，默认 3
     pub max_repeat_filter: Option<u32>,
+
+    // ── 区间转录（均为 Option，None 时转录整段音频） ──
+
+    /// 区间转录：起始时间（秒），None 表示从头
+    pub start_seconds: Option<f64>,
+    /// 区间转录：结束时间（秒），None 表示到末尾
+    pub end_seconds: Option<f64>,
 }
 
 /// 更新转录结果请求（通过 result id 定位）

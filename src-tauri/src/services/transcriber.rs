@@ -15,7 +15,7 @@ use crate::models::audio::{TranscriptionRequest, TranscriptionResult};
 use crate::models::error::AppError;
 use crate::services::paths;
 #[cfg(feature = "whisper-rs-backend")]
-use crate::services::audio::decode_to_16k_mono;
+use crate::services::audio::{decode_to_16k_mono, decode_range_to_16k_mono};
 #[cfg(feature = "whisper-rs-backend")]
 use chrono::Utc;
 #[cfg(feature = "whisper-rs-backend")]
@@ -218,7 +218,14 @@ impl TranscriberService {
         let model_path = self
             .ensure_model(on_model_progress, on_log.clone(), &request.model_name)
             .await?;
-        let decoded = decode_to_16k_mono(Path::new(&request.audio_path))?;
+        let (decoded, time_offset) = match (request.start_seconds, request.end_seconds) {
+            (Some(start), Some(end)) => {
+                on_log(&format!("[推理] 区间转录模式: {start:.2}s ~ {end:.2}s"));
+                let d = decode_range_to_16k_mono(Path::new(&request.audio_path), start, end)?;
+                (d, start)
+            }
+            _ => (decode_to_16k_mono(Path::new(&request.audio_path))?, 0.0),
+        };
 
         on_log("[推理] 音频解码完成");
         on_progress(0.05, "音频解码完成");
@@ -257,6 +264,7 @@ impl TranscriberService {
         let temperature_inc = request.temperature_inc.unwrap_or(0.2).clamp(0.0, 1.0);
         let max_initial_ts = request.max_initial_ts.unwrap_or(1.0).clamp(0.0, 1.0);
         let max_repeat_filter = request.max_repeat_filter.unwrap_or(3);
+        let time_offset = time_offset;
 
         on_log(&format!(
             "[推理] 参数: best_of={best_of}, threads={n_threads}, gpu={use_gpu}, \
@@ -373,8 +381,8 @@ impl TranscriberService {
                     continue;
                 }
                 segments.push(TranscriptionSegment {
-                    start: seg.start_timestamp() as f64 / 100.0,
-                    end: seg.end_timestamp() as f64 / 100.0,
+                    start: seg.start_timestamp() as f64 / 100.0 + time_offset,
+                    end: seg.end_timestamp() as f64 / 100.0 + time_offset,
                     text,
                 });
             }

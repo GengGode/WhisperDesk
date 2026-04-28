@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -11,6 +11,7 @@ use crate::models::audio::{
     TranscriptionResult, UpdateTranscriptionRequest, WhisperLogPayload,
 };
 use crate::models::error::AppError;
+use crate::services::audio::export_wav_clip;
 use crate::services::cuda::CudaInfo;
 use crate::services::file_index::FileIndexService;
 use crate::services::paths;
@@ -97,11 +98,47 @@ pub async fn transcribe_audio(
     let index_service = FileIndexService::portable()?;
     index_service.init()?;
 
-    let result = if let Some(url) = request.remote_url.as_deref().filter(|u| !u.is_empty()) {
+    // 区间转录 + 远程推理时，客户端先导出切片 WAV 再上传（节省带宽）
+    let time_offset = match (request.start_seconds, request.end_seconds) {
+        (Some(s), Some(_)) => s,
+        _ => 0.0,
+    };
+    let (effective_request, _tmp_clip) = if let (Some(url), Some(start), Some(end)) = (
+        request.remote_url.as_deref().filter(|u| !u.is_empty()),
+        request.start_seconds,
+        request.end_seconds,
+    ) {
+        let _ = url;
+        log(&format!("[转录] 远程区间转录：导出 {start:.2}s ~ {end:.2}s 切片 WAV"));
+        let clip_path = std::env::temp_dir()
+            .join(format!("whisperdesk_clip_{}.wav", uuid::Uuid::new_v4()));
+        export_wav_clip(Path::new(&request.audio_path), start, end, &clip_path)?;
+        log(&format!("[转录] 切片已导出: {}", clip_path.display()));
+        let mut req = request.clone();
+        req.audio_path = clip_path.to_string_lossy().to_string();
+        req.start_seconds = None;
+        req.end_seconds = None;
+        (req, Some(clip_path))
+    } else {
+        (request.clone(), None)
+    };
+
+    let result = if let Some(url) = effective_request.remote_url.as_deref().filter(|u| !u.is_empty()) {
         log(&format!("[转录] 使用远程推理: {url}"));
-        emit_progress(&window, &request.audio_file_id, 0.0, "正在连接远程服务器...", "remote_connecting");
-        let mut r = transcribe_via_remote(&window, url, &request).await?;
+        emit_progress(&window, &effective_request.audio_file_id, 0.0, "正在连接远程服务器...", "remote_connecting");
+        let mut r = transcribe_via_remote(&window, url, &effective_request).await?;
         r.audio_file_id = request.audio_file_id.clone();
+        // 远程结果时间戳从 0 开始，需要加上区间偏移
+        if time_offset > 0.0 {
+            for seg in &mut r.segments {
+                seg.start += time_offset;
+                seg.end += time_offset;
+            }
+        }
+        // 清理临时切片文件
+        if let Some(ref clip) = _tmp_clip {
+            let _ = std::fs::remove_file(clip);
+        }
         r
     } else {
         let transcriber = TranscriberService::portable()?;

@@ -1,17 +1,30 @@
 import { useEditorStore } from "@/stores/editor-store";
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
+import { useSettingsStore } from "@/stores/settings-store";
 import {
   getTranscriptionResults,
   updateTranscriptionResult,
   exportTranscription,
   exportFormats,
+  transcribeAudio,
 } from "@/lib/tauri";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExportFormat } from "@/lib/types";
 import { AudioPlayer } from "@/components/audio-player";
 import { Waveform } from "./waveform";
 import { SubtitleEditor } from "./subtitle-editor";
+
+function formatEditorTime(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const frac = Math.floor((seconds % 1) * 10);
+  if (h > 0) {
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}.${frac}`;
+  }
+  return `${m}:${s.toString().padStart(2, "0")}.${frac}`;
+}
 
 export function EditorPanel() {
   const resultId = useEditorStore((s) => s.resultId);
@@ -26,6 +39,8 @@ export function EditorPanel() {
   const files = useAudioStore((s) => s.files);
   const allResultsMap = useTranscriptionStore((s) => s.results);
   const setResults = useTranscriptionStore((s) => s.setResults);
+  const addResult = useTranscriptionStore((s) => s.addResult);
+  const settings = useSettingsStore((s) => s.settings);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -37,6 +52,11 @@ export function EditorPanel() {
   const [seekVersion, setSeekVersion] = useState(0);
   const [showParams, setShowParams] = useState(false);
 
+  // 区间选区与区间转录状态
+  const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
+  const [rangeTranscribing, setRangeTranscribing] = useState(false);
+  const [rangeError, setRangeError] = useState<string | null>(null);
+
   const selectedFile = files.find((f) => f.id === selectedFileId);
 
   const allResults = useMemo(
@@ -44,8 +64,12 @@ export function EditorPanel() {
     [selectedFileId, allResultsMap],
   );
 
-  // 切换文件时重置版本索引
-  useEffect(() => setActiveResultIndex(0), [selectedFileId]);
+  // 切换文件时重置版本索引和选区
+  useEffect(() => {
+    setActiveResultIndex(0);
+    setSelection(null);
+    setRangeError(null);
+  }, [selectedFileId]);
 
   // 自动从数据库加载历史结果
   useEffect(() => {
@@ -101,6 +125,48 @@ export function EditorPanel() {
       setSaving(false);
     }
   }, [resultId, saving, segments, markSaved, selectedFileId, setResults]);
+
+  const handleRangeSelect = useCallback((startTime: number, endTime: number) => {
+    setSelection({ start: startTime, end: endTime });
+    setRangeError(null);
+  }, []);
+
+  const handleRangeTranscribe = useCallback(async () => {
+    if (!selection || !selectedFileId || !selectedFile || rangeTranscribing) return;
+    setRangeTranscribing(true);
+    setRangeError(null);
+    try {
+      const result = await transcribeAudio({
+        audioFileId: selectedFileId,
+        audioPath: selectedFile.path,
+        modelName: settings.modelName,
+        language: settings.language,
+        threads: settings.threads,
+        useGpu: settings.useGpu,
+        remoteUrl: settings.remoteUrl || undefined,
+        bestOf: settings.bestOf,
+        suppressBlank: settings.suppressBlank,
+        suppressNst: settings.suppressNst,
+        noContext: settings.noContext,
+        entropyThold: settings.entropyThold,
+        logprobThold: settings.logprobThold,
+        noSpeechThold: settings.noSpeechThold,
+        temperature: settings.temperature,
+        temperatureInc: settings.temperatureInc,
+        maxInitialTs: settings.maxInitialTs,
+        maxRepeatFilter: settings.maxRepeatFilter,
+        startSeconds: selection.start,
+        endSeconds: selection.end,
+      });
+      addResult(selectedFileId, result);
+      setActiveResultIndex(0);
+      setSelection(null);
+    } catch (err) {
+      setRangeError(String(err));
+    } finally {
+      setRangeTranscribing(false);
+    }
+  }, [selection, selectedFileId, selectedFile, rangeTranscribing, settings, addResult]);
 
   const handleSwitchVersion = useCallback(
     (index: number) => {
@@ -267,8 +333,36 @@ export function EditorPanel() {
           duration={selectedFile.duration}
           segments={segments}
           activeSegment={activeSegment}
+          selection={selection}
           onSeek={handleSeek}
+          onRangeSelect={handleRangeSelect}
         />
+
+        {selection && (
+          <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 dark:border-red-800 dark:bg-red-950/30">
+            <span className="text-xs tabular-nums text-red-700 dark:text-red-300">
+              已选择 {formatEditorTime(selection.start)} ~ {formatEditorTime(selection.end)}
+              （{(selection.end - selection.start).toFixed(1)}秒）
+            </span>
+            <button
+              disabled={rangeTranscribing}
+              className="rounded-md bg-red-600 px-3 py-1 text-xs text-white transition-colors hover:bg-red-700 disabled:opacity-50"
+              onClick={handleRangeTranscribe}
+            >
+              {rangeTranscribing ? "转录中..." : "重新转录此区间"}
+            </button>
+            <button
+              disabled={rangeTranscribing}
+              className="rounded-md border border-red-300 px-3 py-1 text-xs text-red-700 hover:bg-red-100 disabled:opacity-50 dark:border-red-700 dark:text-red-300 dark:hover:bg-red-900/30"
+              onClick={() => setSelection(null)}
+            >
+              取消
+            </button>
+            {rangeError && (
+              <span className="text-xs text-red-600">{rangeError}</span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 可滚动区域：仅字幕编辑 */}

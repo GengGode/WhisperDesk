@@ -9,7 +9,9 @@ interface WaveformProps {
   duration: number;
   segments?: TranscriptionSegment[];
   activeSegment?: TranscriptionSegment;
+  selection?: { start: number; end: number } | null;
   onSeek?: (time: number) => void;
+  onRangeSelect?: (startTime: number, endTime: number) => void;
 }
 
 const WAVE_COLOR = "#94a3b8";
@@ -17,7 +19,10 @@ const PROGRESS_COLOR = "#6366f1";
 const SEGMENT_COLOR = "rgba(99, 102, 241, 0.1)";
 const SEGMENT_BORDER = "rgba(99, 102, 241, 0.3)";
 const ACTIVE_COLOR = "#6366f1";
+const SELECTION_FILL = "rgba(239, 68, 68, 0.12)";
+const SELECTION_STROKE = "rgba(239, 68, 68, 0.5)";
 
+const MIN_SELECTION_SECONDS = 0.5;
 const CANVAS_HEIGHT = 80;
 const SOURCE_PEAKS_COUNT = 8000;
 const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
@@ -97,7 +102,9 @@ export function Waveform({
   duration,
   segments,
   activeSegment,
+  selection,
   onSeek,
+  onRangeSelect,
 }: WaveformProps) {
   const waveCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -109,6 +116,13 @@ export function Waveform({
   const [loadProgress, setLoadProgress] = useState<number | null>(null);
   const [containerWidth, setContainerWidth] = useState(800);
   const [zoom, setZoom] = useState(1);
+  const [hoverInfo, setHoverInfo] = useState<{ x: number; time: number } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  // 右键拖拽选区状态
+  const [isRightDragging, setIsRightDragging] = useState(false);
+  const rightDragStartRef = useRef(0);
+  const [rightDragSelection, setRightDragSelection] = useState<{ start: number; end: number } | null>(null);
 
   const canvasWidth = Math.floor(containerWidth * zoom);
 
@@ -302,7 +316,7 @@ export function Waveform({
     }
   }, [displayPeaks, canvasWidth, segments, activeSegment, duration, loadProgress]);
 
-  // ─── 动态层：仅播放指针 ───
+  // ─── 动态层：播放指针 + 选区 ───
   useEffect(() => {
     const canvas = overlayCanvasRef.current;
     if (!canvas) return;
@@ -311,8 +325,26 @@ export function Waveform({
     if (!ctx) return;
 
     if (duration <= 0) return;
-    const progressX = (currentTime / duration) * canvasWidth;
 
+    // 选区可视化
+    const sel = rightDragSelection ?? selection;
+    if (sel) {
+      const x1 = (sel.start / duration) * canvasWidth;
+      const x2 = (sel.end / duration) * canvasWidth;
+      ctx.fillStyle = SELECTION_FILL;
+      ctx.fillRect(x1, 0, x2 - x1, CANVAS_HEIGHT);
+      ctx.strokeStyle = SELECTION_STROKE;
+      ctx.lineWidth = 1;
+      for (const x of [x1, x2]) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, CANVAS_HEIGHT);
+        ctx.stroke();
+      }
+    }
+
+    // 播放指针
+    const progressX = (currentTime / duration) * canvasWidth;
     if (progressX > 0) {
       ctx.strokeStyle = PROGRESS_COLOR;
       ctx.lineWidth = 1.5;
@@ -321,10 +353,7 @@ export function Waveform({
       ctx.lineTo(progressX, CANVAS_HEIGHT);
       ctx.stroke();
     }
-  }, [currentTime, duration, canvasWidth]);
-
-  const [hoverInfo, setHoverInfo] = useState<{ x: number; time: number } | null>(null);
-  const [isDragging, setIsDragging] = useState(false);
+  }, [currentTime, duration, canvasWidth, selection, rightDragSelection]);
 
   const getTimeFromClientX = useCallback(
     (clientX: number) => {
@@ -339,11 +368,25 @@ export function Waveform({
 
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!onSeek || duration <= 0) return;
-      setIsDragging(true);
-      onSeek(getTimeFromClientX(e.clientX));
+      if (duration <= 0) return;
+
+      if (e.button === 2 && onRangeSelect) {
+        // 右键：启动选区拖拽
+        e.preventDefault();
+        const time = getTimeFromClientX(e.clientX);
+        rightDragStartRef.current = time;
+        setIsRightDragging(true);
+        setRightDragSelection({ start: time, end: time });
+        return;
+      }
+
+      // 左键：seek
+      if (e.button === 0 && onSeek) {
+        setIsDragging(true);
+        onSeek(getTimeFromClientX(e.clientX));
+      }
     },
-    [onSeek, duration, getTimeFromClientX],
+    [onSeek, onRangeSelect, duration, getTimeFromClientX],
   );
 
   const handleMouseMove = useCallback(
@@ -361,7 +404,7 @@ export function Waveform({
     if (!isDragging) setHoverInfo(null);
   }, [isDragging]);
 
-  // 拖拽期间：跟随鼠标持续 seek，松开结束
+  // 左键拖拽期间：跟随鼠标持续 seek，松开结束
   useEffect(() => {
     if (!isDragging) return;
     const handleMove = (e: MouseEvent) => {
@@ -383,6 +426,36 @@ export function Waveform({
       window.removeEventListener("mouseup", handleUp);
     };
   }, [isDragging, onSeek, getTimeFromClientX]);
+
+  // 右键拖拽期间：实时更新选区范围，松开后提交
+  useEffect(() => {
+    if (!isRightDragging) return;
+    const handleMove = (e: MouseEvent) => {
+      const time = getTimeFromClientX(e.clientX);
+      const s = rightDragStartRef.current;
+      setRightDragSelection({
+        start: Math.min(s, time),
+        end: Math.max(s, time),
+      });
+    };
+    const handleUp = (e: MouseEvent) => {
+      setIsRightDragging(false);
+      const time = getTimeFromClientX(e.clientX);
+      const s = rightDragStartRef.current;
+      const rangeStart = Math.min(s, time);
+      const rangeEnd = Math.max(s, time);
+      setRightDragSelection(null);
+      if (rangeEnd - rangeStart >= MIN_SELECTION_SECONDS) {
+        onRangeSelect?.(rangeStart, rangeEnd);
+      }
+    };
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [isRightDragging, getTimeFromClientX, onRangeSelect]);
 
   if (error) {
     return (
@@ -408,6 +481,7 @@ export function Waveform({
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
+              onContextMenu={(e) => e.preventDefault()}
             />
             {hoverInfo && (
               <div
