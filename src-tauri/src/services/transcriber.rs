@@ -411,6 +411,19 @@ impl TranscriberService {
             progress_cb(1.0, "转录完成");
 
             let text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n");
+            let params_json = serde_json::to_string(&serde_json::json!({
+                "bestOf": best_of,
+                "suppressBlank": suppress_blank,
+                "suppressNst": suppress_nst,
+                "noContext": no_context,
+                "entropyThold": entropy_thold,
+                "logprobThold": logprob_thold,
+                "noSpeechThold": no_speech_thold,
+                "temperature": temperature,
+                "temperatureInc": temperature_inc,
+                "maxInitialTs": max_initial_ts,
+                "maxRepeatFilter": max_repeat_filter,
+            })).ok();
             let _ = tx.send(Ok(TranscriptionResult {
                 id: uuid::Uuid::new_v4().to_string(),
                 audio_file_id,
@@ -420,6 +433,7 @@ impl TranscriberService {
                 language: req_language.unwrap_or_else(|| "auto".to_string()),
                 duration,
                 created_at: Utc::now().to_rfc3339(),
+                params_json,
             }));
         });
 

@@ -44,6 +44,9 @@ pub struct TranscriptionResult {
     /// 音频时长（秒）
     pub duration: f64,
     pub created_at: String,
+    /// 本次转录使用的 Whisper 推理参数快照（JSON），历史数据可能为 None
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params_json: Option<String>,
 }
 
 /// 转录分段

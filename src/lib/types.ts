@@ -32,6 +32,8 @@ export interface TranscriptionResult {
   language: string;
   duration: number;
   createdAt: string;
+  /** 本次转录使用的推理参数快照（JSON 字符串），历史数据可能缺失 */
+  paramsJson?: string;
 }
 
 /** 转录分段（带时间戳） */

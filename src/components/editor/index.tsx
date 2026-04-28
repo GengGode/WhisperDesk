@@ -35,6 +35,7 @@ export function EditorPanel() {
   const [seekTime, setSeekTime] = useState(0);
   const seekVersionRef = useRef(0);
   const [seekVersion, setSeekVersion] = useState(0);
+  const [showParams, setShowParams] = useState(false);
 
   const selectedFile = files.find((f) => f.id === selectedFileId);
 
@@ -207,6 +208,49 @@ export function EditorPanel() {
                 </span>
               </button>
             ))}
+          </div>
+        )}
+
+        {allResults[activeResultIndex]?.paramsJson && (
+          <div className="text-xs">
+            <button
+              className="text-primary hover:underline"
+              onClick={() => setShowParams((v) => !v)}
+            >
+              {showParams ? "收起参数" : "查看转录参数"}
+            </button>
+            {showParams && (() => {
+              try {
+                const p = JSON.parse(allResults[activeResultIndex].paramsJson!) as Record<string, unknown>;
+                const labels: Record<string, string> = {
+                  bestOf: "采样候选数",
+                  suppressBlank: "抑制空白",
+                  suppressNst: "抑制非语音",
+                  noContext: "禁用上下文",
+                  entropyThold: "熵阈值",
+                  logprobThold: "对数概率阈值",
+                  noSpeechThold: "静音检测阈值",
+                  temperature: "初始温度",
+                  temperatureInc: "温度递增",
+                  maxInitialTs: "首时间戳偏移",
+                  maxRepeatFilter: "重复过滤阈值",
+                };
+                return (
+                  <div className="mt-1.5 rounded-md border border-border bg-surface-secondary px-3 py-2">
+                    <div className="grid grid-cols-3 gap-x-4 gap-y-1">
+                      {Object.entries(p).map(([k, v]) => (
+                        <div key={k} className="flex justify-between gap-2">
+                          <span className="text-text-secondary">{labels[k] ?? k}</span>
+                          <span className="font-medium tabular-nums">{String(v)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              } catch {
+                return null;
+              }
+            })()}
           </div>
         )}
 

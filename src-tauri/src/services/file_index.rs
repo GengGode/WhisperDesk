@@ -94,6 +94,18 @@ impl FileIndexService {
             )?;
         }
 
+        // 迁移：添加 params_json 列（存储转录参数快照）
+        let has_params_json: bool = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('transcription_results') WHERE name = 'params_json'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )? > 0;
+        if !has_params_json {
+            conn.execute_batch(
+                "ALTER TABLE transcription_results ADD COLUMN params_json TEXT;",
+            )?;
+        }
+
         // 迁移：添加 starred 列
         let has_starred: bool = conn.query_row(
             "SELECT COUNT(*) FROM pragma_table_info('audio_files') WHERE name = 'starred'",
@@ -290,8 +302,8 @@ impl FileIndexService {
             .map_err(|e| AppError::Database(format!("序列化分段失败: {e}")))?;
 
         conn.execute(
-            "INSERT INTO transcription_results (id, audio_file_id, model_name, text, segments_json, language, duration, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO transcription_results (id, audio_file_id, model_name, text, segments_json, language, duration, created_at, params_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             params![
                 result.id,
                 result.audio_file_id,
@@ -301,6 +313,7 @@ impl FileIndexService {
                 result.language,
                 result.duration,
                 result.created_at,
+                result.params_json,
             ],
         )?;
 
@@ -339,7 +352,7 @@ impl FileIndexService {
     pub fn get_transcription_results(&self, audio_file_id: &str) -> Result<Vec<TranscriptionResult>, AppError> {
         let conn = Connection::open(&self.db_path)?;
         let mut stmt = conn.prepare(
-            "SELECT id, audio_file_id, model_name, text, segments_json, language, duration, created_at
+            "SELECT id, audio_file_id, model_name, text, segments_json, language, duration, created_at, params_json
              FROM transcription_results
              WHERE audio_file_id = ?
              ORDER BY created_at DESC",
@@ -347,16 +360,17 @@ impl FileIndexService {
 
         let rows = stmt.query_map(params![audio_file_id], |row| {
             let segments_json: String = row.get(4)?;
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, segments_json, row.get(5)?, row.get(6)?, row.get(7)?))
+            let params_json: Option<String> = row.get(8)?;
+            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, segments_json, row.get(5)?, row.get(6)?, row.get(7)?, params_json))
         })?;
 
         let mut out = Vec::new();
         for row in rows {
-            let (id, audio_file_id, model_name, text, segments_json, language, duration, created_at):
-                (String, String, String, String, String, String, f64, String) = row?;
+            let (id, audio_file_id, model_name, text, segments_json, language, duration, created_at, params_json):
+                (String, String, String, String, String, String, f64, String, Option<String>) = row?;
             let segments: Vec<TranscriptionSegment> = serde_json::from_str(&segments_json)
                 .map_err(|e| AppError::Database(format!("反序列化分段失败: {e}")))?;
-            out.push(TranscriptionResult { id, audio_file_id, model_name, text, segments, language, duration, created_at });
+            out.push(TranscriptionResult { id, audio_file_id, model_name, text, segments, language, duration, created_at, params_json });
         }
         Ok(out)
     }
@@ -365,7 +379,7 @@ impl FileIndexService {
     pub fn get_transcription_result_by_id(&self, id: &str) -> Result<Option<TranscriptionResult>, AppError> {
         let conn = Connection::open(&self.db_path)?;
         let mut stmt = conn.prepare(
-            "SELECT id, audio_file_id, model_name, text, segments_json, language, duration, created_at
+            "SELECT id, audio_file_id, model_name, text, segments_json, language, duration, created_at, params_json
              FROM transcription_results WHERE id = ?",
         )?;
 
@@ -383,6 +397,7 @@ impl FileIndexService {
                 language: row.get(5)?,
                 duration: row.get(6)?,
                 created_at: row.get(7)?,
+                params_json: row.get(8)?,
             }));
         }
         Ok(None)
