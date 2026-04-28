@@ -1,14 +1,24 @@
 import { useSettingsStore } from "@/stores/settings-store";
+import type { ThemeMode } from "@/lib/types";
 
 interface SidebarProps {
   children: React.ReactNode;
 }
 
+const THEME_CYCLE: ThemeMode[] = ["light", "dark", "system"];
+
 export function Sidebar({ children }: SidebarProps) {
   const useGpu = useSettingsStore((s) => s.settings.useGpu);
+  const theme = useSettingsStore((s) => s.settings.theme);
   const cudaAvailable = useSettingsStore((s) => s.cudaAvailable);
   const cudaMessage = useSettingsStore((s) => s.cudaMessage);
   const setSettings = useSettingsStore((s) => s.setSettings);
+
+  const cycleTheme = () => {
+    const idx = THEME_CYCLE.indexOf(theme);
+    const next = THEME_CYCLE[(idx + 1) % THEME_CYCLE.length];
+    setSettings({ theme: next });
+  };
 
   return (
     <aside className="flex w-64 shrink-0 flex-col border-r border-border bg-surface-secondary">
@@ -16,7 +26,8 @@ export function Sidebar({ children }: SidebarProps) {
         <h1 className="text-lg font-semibold tracking-tight">WhisperDesk</h1>
       </div>
       <nav className="flex-1 overflow-y-auto p-2">{children}</nav>
-      <div className="border-t border-border px-4 py-3">
+      <div className="border-t border-border px-4 py-3 space-y-1">
+        <ThemeToggle theme={theme} onClick={cycleTheme} />
         <GpuToggle
           checked={useGpu}
           localCudaAvailable={cudaAvailable}
@@ -25,6 +36,47 @@ export function Sidebar({ children }: SidebarProps) {
         />
       </div>
     </aside>
+  );
+}
+
+const THEME_LABELS: Record<ThemeMode, string> = {
+  light: "浅色",
+  dark: "深色",
+  system: "跟随系统",
+};
+
+function ThemeToggle({ theme, onClick }: { theme: ThemeMode; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 transition-colors hover:bg-border/40"
+      onClick={onClick}
+      title={`当前：${THEME_LABELS[theme]}，点击切换`}
+    >
+      <div className="flex items-center gap-2">
+        {theme === "light" && (
+          <svg className="h-4 w-4 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 19.95l-.71.71M21 12h-1M4 12H3m16.66 7.66l-.71-.71M4.05 4.05l-.71-.71M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+        )}
+        {theme === "dark" && (
+          <svg className="h-4 w-4 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+        )}
+        {theme === "system" && (
+          <svg className="h-4 w-4 text-text-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+              d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+          </svg>
+        )}
+        <span className="text-xs font-medium text-text-secondary">
+          {THEME_LABELS[theme]}
+        </span>
+      </div>
+    </button>
   );
 }
 

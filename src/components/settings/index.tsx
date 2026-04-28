@@ -14,7 +14,7 @@ import {
 import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranscriptionStore } from "@/stores/transcription-store";
-import type { DashboardSnapshot, ServerStatus, WhisperModel } from "@/lib/types";
+import type { DashboardSnapshot, ServerStatus, ThemeMode, WhisperModel } from "@/lib/types";
 
 const MODEL_NAMES = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"] as const;
 
@@ -207,6 +207,17 @@ export function SettingsPanel() {
           <h3 className="text-sm font-semibold text-text-secondary">通用</h3>
 
           <div className="rounded-lg border border-border p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <span className="text-sm font-medium">外观主题</span>
+                <p className="text-xs text-text-secondary">选择应用的显示主题</p>
+              </div>
+              <ThemeSelector
+                value={settings.theme}
+                onChange={(t) => setSettings({ theme: t })}
+              />
+            </div>
+
             <label className="flex items-center justify-between gap-2">
               <div>
                 <span className="text-sm font-medium">开机自启</span>
@@ -777,5 +788,38 @@ export function SettingsPanel() {
         </div>
       </div>
     </section>
+  );
+}
+
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: "light", label: "浅色" },
+  { value: "dark", label: "深色" },
+  { value: "system", label: "系统" },
+];
+
+function ThemeSelector({
+  value,
+  onChange,
+}: {
+  value: ThemeMode;
+  onChange: (t: ThemeMode) => void;
+}) {
+  return (
+    <div className="flex rounded-lg border border-border bg-surface p-0.5">
+      {THEME_OPTIONS.map((opt) => (
+        <button
+          key={opt.value}
+          type="button"
+          className={`rounded-md px-3 py-1 text-xs font-medium transition-colors ${
+            value === opt.value
+              ? "bg-primary text-white"
+              : "text-text-secondary hover:text-text"
+          }`}
+          onClick={() => onChange(opt.value)}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
   );
 }

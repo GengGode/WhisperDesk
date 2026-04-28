@@ -115,7 +115,10 @@ export interface WaveformData {
   numPeaks: number;
 }
 
+export type ThemeMode = "light" | "dark" | "system";
+
 export interface AppSettings {
+  theme: ThemeMode;
   modelName: string;
   language: string;
   threads: number;

@@ -18,6 +18,7 @@ import { useAudioStore } from "@/stores/audio-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import { useTranscriptionQueue } from "@/hooks/use-transcription-queue";
+import { useTheme } from "@/hooks/use-theme";
 
 type Page = "files" | "transcription" | "editor" | "settings";
 
@@ -30,6 +31,7 @@ function App() {
   const addLog = useTranscriptionStore((s) => s.addLog);
   const initCuda = useSettingsStore((s) => s.initCuda);
 
+  useTheme();
   useTranscriptionQueue();
 
   useEffect(() => {

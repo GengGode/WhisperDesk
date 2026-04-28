@@ -5,6 +5,7 @@ import { checkCuda } from "@/lib/tauri";
 const STORAGE_KEY = "whisperdesk.settings";
 
 const defaultSettings: AppSettings = {
+  theme: "system",
   modelName: "base",
   language: "zh",
   threads: 4,
