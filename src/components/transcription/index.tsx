@@ -39,10 +39,13 @@ export function TranscriptionPanel() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const [showParams, setShowParams] = useState(false);
 
-  // VAD 分析状态
+  // VAD 分析状态（与 settings store 双向同步）
+  const setSettings = useSettingsStore((s) => s.setSettings);
   const [vadSegments, setVadSegments] = useState<VadSegment[] | null>(null);
   const [vadLoading, setVadLoading] = useState(false);
-  const [vadConfig, setVadConfig] = useState<VadConfig>({ ...defaultVadConfig });
+  const [vadConfig, setVadConfig] = useState<VadConfig>(
+    () => settings.vadConfig ?? { ...defaultVadConfig },
+  );
   const [showVadPanel, setShowVadPanel] = useState(false);
   const vadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -54,6 +57,18 @@ export function TranscriptionPanel() {
     setActiveResultIndex(0);
     setVadSegments(null);
   }, [selectedFileId]);
+
+  // vadConfig 变化时同步写入 settings store，使转录请求使用同一套参数
+  const updateVadConfig = useCallback(
+    (updater: (prev: VadConfig) => VadConfig) => {
+      setVadConfig((prev) => {
+        const next = updater(prev);
+        setSettings({ vadConfig: next });
+        return next;
+      });
+    },
+    [setSettings],
+  );
 
   // VAD 分析：展开面板时自动运行，参数变化 debounce 刷新
   const runVadAnalysis = useCallback((path: string, config: VadConfig) => {
@@ -283,7 +298,7 @@ export function TranscriptionPanel() {
                       step={1}
                       value={vadConfig.energyThresholdDb}
                       onChange={(e) =>
-                        setVadConfig((c) => ({ ...c, energyThresholdDb: Number(e.target.value) }))
+                        updateVadConfig((c) => ({ ...c, energyThresholdDb: Number(e.target.value) }))
                       }
                       className="h-1 w-20 accent-primary"
                     />
@@ -301,7 +316,7 @@ export function TranscriptionPanel() {
                       step={50}
                       value={vadConfig.minSilenceMs}
                       onChange={(e) =>
-                        setVadConfig((c) => ({ ...c, minSilenceMs: Number(e.target.value) }))
+                        updateVadConfig((c) => ({ ...c, minSilenceMs: Number(e.target.value) }))
                       }
                       className="h-1 w-20 accent-primary"
                     />
@@ -319,7 +334,7 @@ export function TranscriptionPanel() {
                       step={50}
                       value={vadConfig.minSpeechMs}
                       onChange={(e) =>
-                        setVadConfig((c) => ({ ...c, minSpeechMs: Number(e.target.value) }))
+                        updateVadConfig((c) => ({ ...c, minSpeechMs: Number(e.target.value) }))
                       }
                       className="h-1 w-20 accent-primary"
                     />
@@ -337,7 +352,7 @@ export function TranscriptionPanel() {
                       step={10}
                       value={vadConfig.paddingMs}
                       onChange={(e) =>
-                        setVadConfig((c) => ({ ...c, paddingMs: Number(e.target.value) }))
+                        updateVadConfig((c) => ({ ...c, paddingMs: Number(e.target.value) }))
                       }
                       className="h-1 w-20 accent-primary"
                     />
@@ -348,7 +363,7 @@ export function TranscriptionPanel() {
 
               <button
                 className="text-xs text-text-secondary hover:text-primary"
-                onClick={() => setVadConfig({ ...defaultVadConfig })}
+                onClick={() => updateVadConfig(() => ({ ...defaultVadConfig }))}
               >
                 恢复默认参数
               </button>
