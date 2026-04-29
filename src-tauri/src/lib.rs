@@ -37,6 +37,7 @@ pub fn run() {
             commands::whisper::check_cuda,
             commands::whisper::abort_transcription,
             commands::audio::get_audio_peaks,
+            commands::audio::analyze_vad,
             commands::server::start_inference_server,
             commands::server::stop_inference_server,
             commands::server::get_inference_server_status,

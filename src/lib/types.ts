@@ -92,7 +92,39 @@ export interface TranscriptionRequest {
   // 区间转录
   startSeconds?: number;
   endSeconds?: number;
+
+  // VAD 预分割
+  enableVad?: boolean;
+  vadConfig?: VadConfig;
+
+  // Prompt 引导
+  initialPrompt?: string;
 }
+
+// ── VAD 相关类型 ──
+
+/** VAD 算法参数 */
+export interface VadConfig {
+  energyThresholdDb: number;
+  minSilenceMs: number;
+  minSpeechMs: number;
+  paddingMs: number;
+}
+
+/** VAD 分割结果段 */
+export interface VadSegment {
+  startSeconds: number;
+  endSeconds: number;
+  isVoice: boolean;
+}
+
+/** VAD 默认参数 */
+export const defaultVadConfig: VadConfig = {
+  energyThresholdDb: -40,
+  minSilenceMs: 300,
+  minSpeechMs: 250,
+  paddingMs: 100,
+};
 
 export type ExportFormat = "txt" | "srt" | "json" | "lrc";
 
@@ -144,6 +176,13 @@ export interface AppSettings {
   temperatureInc: number;
   maxInitialTs: number;
   maxRepeatFilter: number;
+
+  // VAD 预分割
+  enableVad: boolean;
+  vadConfig: VadConfig;
+
+  // Prompt 引导
+  initialPrompt: string;
 }
 
 /** 推理服务运行状态 */
@@ -188,6 +227,8 @@ export interface ServerConfig {
   temperatureInc: number;
   maxInitialTs: number;
   maxRepeatFilter: number;
+  enableVad: boolean;
+  initialPrompt: string;
 }
 
 /** Dashboard 快照 */

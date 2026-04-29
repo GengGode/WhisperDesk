@@ -1,5 +1,30 @@
 use serde::{Deserialize, Serialize};
 
+// ── VAD（语音活动检测）相关结构 ──
+
+/// VAD 算法参数
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VadConfig {
+    /// 帧能量阈值（dB），低于此值判定为静音，默认 -40.0
+    pub energy_threshold_db: f32,
+    /// 静音段最短持续时间（ms），间隔低于此值的相邻语音段会被合并，默认 300
+    pub min_silence_ms: u32,
+    /// 语音段最短持续时间（ms），低于此值的段会被丢弃，默认 250
+    pub min_speech_ms: u32,
+    /// 语音段前后缓冲（ms），保留起始/结尾轻声，默认 100
+    pub padding_ms: u32,
+}
+
+/// VAD 分割结果段
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VadSegment {
+    pub start_seconds: f64,
+    pub end_seconds: f64,
+    pub is_voice: bool,
+}
+
 /// 音频文件元数据
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -124,6 +149,18 @@ pub struct TranscriptionRequest {
     pub start_seconds: Option<f64>,
     /// 区间转录：结束时间（秒），None 表示到末尾
     pub end_seconds: Option<f64>,
+
+    // ── VAD 预分割 ──
+
+    /// 是否启用 VAD 预分割（跳过静音段、逐有声段推理），默认 true
+    pub enable_vad: Option<bool>,
+    /// VAD 参数，None 时使用默认值
+    pub vad_config: Option<VadConfig>,
+
+    // ── Prompt 引导 ──
+
+    /// 初始提示词，注入 decoder 引导输出风格和术语
+    pub initial_prompt: Option<String>,
 }
 
 /// 更新转录结果请求（通过 result id 定位）

@@ -61,6 +61,9 @@ export function useTranscriptionQueue() {
       temperatureInc: settings.temperatureInc,
       maxInitialTs: settings.maxInitialTs,
       maxRepeatFilter: settings.maxRepeatFilter,
+      enableVad: settings.enableVad,
+      vadConfig: settings.vadConfig,
+      initialPrompt: settings.initialPrompt || undefined,
     })
       .then((result) => {
         addResult(fileId, result);

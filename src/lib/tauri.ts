@@ -12,6 +12,8 @@ import type {
   TranscriptionRequest,
   TranscriptionResult,
   UpdateTranscriptionRequest,
+  VadConfig,
+  VadSegment,
   WaveformData,
   WhisperModel,
 } from "@/lib/types";
@@ -144,6 +146,13 @@ export async function getAudioPeaks(
   numPeaks?: number,
 ): Promise<WaveformData> {
   return invoke<WaveformData>("get_audio_peaks", { audioPath, numPeaks });
+}
+
+export async function analyzeVad(
+  audioPath: string,
+  config: VadConfig,
+): Promise<VadSegment[]> {
+  return invoke<VadSegment[]>("analyze_vad", { audioPath, config });
 }
 
 export async function updateTranscriptionResult(

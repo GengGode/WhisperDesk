@@ -3,3 +3,4 @@ pub mod cuda;
 pub mod file_index;
 pub mod paths;
 pub mod transcriber;
+pub mod vad;

@@ -180,6 +180,9 @@ async fn transcribe(
         max_repeat_filter: Some(cfg.max_repeat_filter),
         start_seconds: None,
         end_seconds: None,
+        enable_vad: Some(cfg.enable_vad),
+        vad_config: None,
+        initial_prompt: if cfg.initial_prompt.is_empty() { None } else { Some(cfg.initial_prompt) },
     };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);

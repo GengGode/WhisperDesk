@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { AppSettings } from "@/lib/types";
+import { defaultVadConfig } from "@/lib/types";
 import { checkCuda } from "@/lib/tauri";
 
 const STORAGE_KEY = "whisperdesk.settings";
@@ -26,6 +27,10 @@ const defaultSettings: AppSettings = {
   temperatureInc: 0.2,
   maxInitialTs: 1.0,
   maxRepeatFilter: 3,
+
+  enableVad: true,
+  vadConfig: { ...defaultVadConfig },
+  initialPrompt: "",
 };
 
 interface SettingsState {

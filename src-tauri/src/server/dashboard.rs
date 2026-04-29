@@ -37,6 +37,10 @@ pub struct ServerConfig {
     pub max_initial_ts: f32,
     #[serde(default = "default_max_repeat_filter")]
     pub max_repeat_filter: u32,
+    #[serde(default = "default_true")]
+    pub enable_vad: bool,
+    #[serde(default)]
+    pub initial_prompt: String,
 }
 
 fn default_best_of() -> i32 { 5 }
@@ -65,6 +69,8 @@ impl Default for ServerConfig {
             temperature_inc: default_temperature_inc(),
             max_initial_ts: default_max_initial_ts(),
             max_repeat_filter: default_max_repeat_filter(),
+            enable_vad: true,
+            initial_prompt: String::new(),
         }
     }
 }

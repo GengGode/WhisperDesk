@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getAudioPeaks } from "@/lib/tauri";
-import type { TranscriptionSegment } from "@/lib/types";
+import type { TranscriptionSegment, VadSegment } from "@/lib/types";
 
 interface WaveformProps {
   audioPath: string;
@@ -10,6 +10,7 @@ interface WaveformProps {
   segments?: TranscriptionSegment[];
   activeSegment?: TranscriptionSegment;
   selection?: { start: number; end: number } | null;
+  vadSegments?: VadSegment[];
   onSeek?: (time: number) => void;
   onRangeSelect?: (startTime: number, endTime: number) => void;
 }
@@ -21,6 +22,9 @@ const SEGMENT_BORDER = "rgba(99, 102, 241, 0.3)";
 const ACTIVE_COLOR = "#6366f1";
 const SELECTION_FILL = "rgba(239, 68, 68, 0.12)";
 const SELECTION_STROKE = "rgba(239, 68, 68, 0.5)";
+const VAD_VOICE_COLOR = "rgba(34, 197, 94, 0.55)";
+const VAD_SILENCE_COLOR = "rgba(148, 163, 184, 0.18)";
+const VAD_BAR_HEIGHT = 12;
 
 const MIN_SELECTION_SECONDS = 0.5;
 const CANVAS_HEIGHT = 80;
@@ -103,11 +107,13 @@ export function Waveform({
   segments,
   activeSegment,
   selection,
+  vadSegments,
   onSeek,
   onRangeSelect,
 }: WaveformProps) {
   const waveCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
+  const vadCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -355,6 +361,29 @@ export function Waveform({
     }
   }, [currentTime, duration, canvasWidth, selection, rightDragSelection]);
 
+  // ─── VAD 指示条：独立 canvas，波形图下方 ───
+  useEffect(() => {
+    const canvas = vadCanvasRef.current;
+    if (!canvas || !vadSegments || duration <= 0) return;
+
+    const ctx = setupCanvas(canvas, canvasWidth, VAD_BAR_HEIGHT);
+    if (!ctx) return;
+
+    const w = canvasWidth;
+    const h = VAD_BAR_HEIGHT;
+    const r = 2; // 圆角半径
+
+    for (const seg of vadSegments) {
+      const x1 = Math.round((seg.startSeconds / duration) * w);
+      const x2 = Math.round((seg.endSeconds / duration) * w);
+      const segW = Math.max(1, x2 - x1);
+      ctx.fillStyle = seg.isVoice ? VAD_VOICE_COLOR : VAD_SILENCE_COLOR;
+      ctx.beginPath();
+      ctx.roundRect(x1, 1, segW, h - 2, r);
+      ctx.fill();
+    }
+  }, [vadSegments, canvasWidth, duration]);
+
   const getTimeFromClientX = useCallback(
     (clientX: number) => {
       const canvas = overlayCanvasRef.current;
@@ -492,6 +521,13 @@ export function Waveform({
               </div>
             )}
           </div>
+          {vadSegments && (
+            <canvas
+              ref={vadCanvasRef}
+              style={{ width: canvasWidth, height: VAD_BAR_HEIGHT }}
+              className="mt-0.5"
+            />
+          )}
         </div>
       )}
       <div className="mt-2 flex items-center gap-2">

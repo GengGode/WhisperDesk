@@ -75,6 +75,8 @@ export function SettingsPanel() {
       temperatureInc: settings.temperatureInc,
       maxInitialTs: settings.maxInitialTs,
       maxRepeatFilter: settings.maxRepeatFilter,
+      enableVad: settings.enableVad,
+      initialPrompt: settings.initialPrompt,
     }).catch(() => {});
   }, [
     settings.modelName, settings.threads, settings.useGpu,
@@ -82,6 +84,7 @@ export function SettingsPanel() {
     settings.noContext, settings.entropyThold, settings.logprobThold,
     settings.noSpeechThold, settings.temperature, settings.temperatureInc,
     settings.maxInitialTs, settings.maxRepeatFilter,
+    settings.enableVad, settings.initialPrompt,
   ]);
 
   useEffect(() => {

@@ -8,9 +8,11 @@ import {
   exportTranscription,
   exportFormats,
   transcribeAudio,
+  analyzeVad,
 } from "@/lib/tauri";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ExportFormat } from "@/lib/types";
+import type { ExportFormat, VadConfig, VadSegment } from "@/lib/types";
+import { defaultVadConfig } from "@/lib/types";
 import { AudioPlayer } from "@/components/audio-player";
 import { Waveform } from "./waveform";
 import { SubtitleEditor } from "./subtitle-editor";
@@ -57,6 +59,21 @@ export function EditorPanel() {
   const [rangeTranscribing, setRangeTranscribing] = useState(false);
   const [rangeError, setRangeError] = useState<string | null>(null);
 
+  // VAD 分析状态（vadConfig 直接读写 settings store，确保推理时使用相同配置）
+  const [vadSegments, setVadSegments] = useState<VadSegment[] | null>(null);
+  const [vadLoading, setVadLoading] = useState(false);
+  const vadConfig = settings.vadConfig;
+  const setSettings = useSettingsStore((s) => s.setSettings);
+  const setVadConfig = useCallback(
+    (updater: VadConfig | ((prev: VadConfig) => VadConfig)) => {
+      const next = typeof updater === "function" ? updater(vadConfig) : updater;
+      setSettings({ vadConfig: next });
+    },
+    [vadConfig, setSettings],
+  );
+  const [showVadPanel, setShowVadPanel] = useState(false);
+  const vadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const selectedFile = files.find((f) => f.id === selectedFileId);
 
   const allResults = useMemo(
@@ -69,7 +86,25 @@ export function EditorPanel() {
     setActiveResultIndex(0);
     setSelection(null);
     setRangeError(null);
+    setVadSegments(null);
   }, [selectedFileId]);
+
+  // VAD 分析：首次展开面板或文件/参数变化时触发（debounce 500ms）
+  const runVadAnalysis = useCallback((path: string, config: VadConfig) => {
+    if (vadDebounceRef.current) clearTimeout(vadDebounceRef.current);
+    vadDebounceRef.current = setTimeout(() => {
+      setVadLoading(true);
+      analyzeVad(path, config)
+        .then(setVadSegments)
+        .catch(() => setVadSegments(null))
+        .finally(() => setVadLoading(false));
+    }, 500);
+  }, []);
+
+  useEffect(() => {
+    if (!showVadPanel || !selectedFile) return;
+    runVadAnalysis(selectedFile.path, vadConfig);
+  }, [showVadPanel, selectedFile, vadConfig, runVadAnalysis]);
 
   // 自动从数据库加载历史结果
   useEffect(() => {
@@ -158,6 +193,9 @@ export function EditorPanel() {
         temperatureInc: settings.temperatureInc,
         maxInitialTs: settings.maxInitialTs,
         maxRepeatFilter: settings.maxRepeatFilter,
+        enableVad: settings.enableVad,
+        vadConfig: settings.vadConfig,
+        initialPrompt: settings.initialPrompt || undefined,
         startSeconds: selection.start,
         endSeconds: selection.end,
       });
@@ -358,9 +396,123 @@ export function EditorPanel() {
           segments={segments}
           activeSegment={activeSegment}
           selection={selection}
+          vadSegments={showVadPanel && vadSegments ? vadSegments : undefined}
           onSeek={handleSeek}
           onRangeSelect={handleRangeSelect}
         />
+
+        {/* VAD 分析面板 */}
+        <div className="space-y-2">
+          <button
+            className="text-xs text-primary hover:underline"
+            onClick={() => setShowVadPanel((v) => !v)}
+          >
+            {showVadPanel ? "收起 VAD 分析" : "VAD 语音检测分析"}
+          </button>
+
+          {showVadPanel && (
+            <div className="rounded-lg border border-border bg-surface-secondary p-3 space-y-3">
+              {vadLoading && (
+                <div className="text-xs text-text-secondary animate-pulse">分析中...</div>
+              )}
+
+              {vadSegments && !vadLoading && (() => {
+                const voiceSegs = vadSegments.filter((s) => s.isVoice);
+                const totalVoice = voiceSegs.reduce((sum, s) => sum + s.endSeconds - s.startSeconds, 0);
+                const totalDuration = selectedFile?.duration ?? 0;
+                const silenceRatio = totalDuration > 0 ? ((1 - totalVoice / totalDuration) * 100) : 0;
+                return (
+                  <div className="flex gap-4 text-xs text-text-secondary">
+                    <span>{voiceSegs.length} 个有声段</span>
+                    <span>有声 {totalVoice.toFixed(1)}s</span>
+                    <span>静音占比 {silenceRatio.toFixed(0)}%</span>
+                  </div>
+                );
+              })()}
+
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-text-secondary">能量阈值 (dB)</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="range"
+                      min={-50}
+                      max={-10}
+                      step={1}
+                      value={vadConfig.energyThresholdDb}
+                      onChange={(e) =>
+                        setVadConfig((c) => ({ ...c, energyThresholdDb: Number(e.target.value) }))
+                      }
+                      className="h-1 w-20 accent-primary"
+                    />
+                    <span className="w-8 tabular-nums text-right">{vadConfig.energyThresholdDb}</span>
+                  </div>
+                </label>
+
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-text-secondary">最小静音 (ms)</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="range"
+                      min={50}
+                      max={2000}
+                      step={50}
+                      value={vadConfig.minSilenceMs}
+                      onChange={(e) =>
+                        setVadConfig((c) => ({ ...c, minSilenceMs: Number(e.target.value) }))
+                      }
+                      className="h-1 w-20 accent-primary"
+                    />
+                    <span className="w-10 tabular-nums text-right">{vadConfig.minSilenceMs}</span>
+                  </div>
+                </label>
+
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-text-secondary">最小语音 (ms)</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="range"
+                      min={50}
+                      max={2000}
+                      step={50}
+                      value={vadConfig.minSpeechMs}
+                      onChange={(e) =>
+                        setVadConfig((c) => ({ ...c, minSpeechMs: Number(e.target.value) }))
+                      }
+                      className="h-1 w-20 accent-primary"
+                    />
+                    <span className="w-10 tabular-nums text-right">{vadConfig.minSpeechMs}</span>
+                  </div>
+                </label>
+
+                <label className="flex items-center justify-between gap-2">
+                  <span className="text-text-secondary">前后缓冲 (ms)</span>
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="range"
+                      min={0}
+                      max={500}
+                      step={10}
+                      value={vadConfig.paddingMs}
+                      onChange={(e) =>
+                        setVadConfig((c) => ({ ...c, paddingMs: Number(e.target.value) }))
+                      }
+                      className="h-1 w-20 accent-primary"
+                    />
+                    <span className="w-10 tabular-nums text-right">{vadConfig.paddingMs}</span>
+                  </div>
+                </label>
+              </div>
+
+              <button
+                className="text-xs text-text-secondary hover:text-primary"
+                onClick={() => setVadConfig({ ...defaultVadConfig })}
+              >
+                恢复默认参数
+              </button>
+            </div>
+          )}
+        </div>
 
         {selection && (
           <div className="flex items-center gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 dark:border-red-800 dark:bg-red-950/30">

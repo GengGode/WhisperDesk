@@ -529,6 +529,23 @@ pub fn export_wav_clip(
     write_wav_16bit(output_path, &decoded.samples_16k_mono, 16_000)
 }
 
+/// 峰值归一化：将样本缩放到 target_peak（默认 0.95），
+/// 消除不同录音音量差异对 Whisper 的影响。
+/// 就地修改，零分配。peak < 0.01 时跳过以避免放大纯静音噪声。
+pub fn normalize_peak(samples: &mut [f32]) {
+    const TARGET_PEAK: f32 = 0.95;
+    const MIN_PEAK: f32 = 0.01;
+
+    let peak = samples.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
+    if peak < MIN_PEAK || (peak - TARGET_PEAK).abs() < 0.01 {
+        return;
+    }
+    let gain = TARGET_PEAK / peak;
+    for s in samples.iter_mut() {
+        *s *= gain;
+    }
+}
+
 fn resample_linear(samples: &[f32], src_rate: u32, target_rate: u32) -> Vec<f32> {
     if src_rate == target_rate || samples.is_empty() {
         return samples.to_vec();
