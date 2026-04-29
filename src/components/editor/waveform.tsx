@@ -501,7 +501,7 @@ export function Waveform({
           正在生成波形...
         </div>
       ) : (
-        <div ref={scrollRef} className="overflow-x-auto rounded">
+        <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden rounded">
           <div className="relative" style={{ width: canvasWidth, height: CANVAS_HEIGHT }}>
             <canvas ref={waveCanvasRef} className="absolute inset-0" />
             <canvas
