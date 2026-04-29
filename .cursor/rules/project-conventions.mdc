@@ -35,3 +35,10 @@ alwaysApply: true
 
 - 代码注释一律使用**中文**书写
 - 包括但不限于：行内注释、块注释、文件头注释、TODO/FIXME 等
+
+# 图表规范
+
+- 流程图、架构图、时序图等一律使用 **Mermaid** 格式编写
+- 适用场景包括但不限于：流程图（flowchart）、时序图（sequenceDiagram）、类图（classDiagram）、状态图（stateDiagram）、ER 图（erDiagram）等
+- 禁止使用纯 ASCII 字符画或外部图片代替可用 Mermaid 表达的图表
+- Mermaid 图表中的标签和说明文字使用**中文**
