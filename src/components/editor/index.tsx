@@ -133,10 +133,13 @@ export function EditorPanel() {
 
   const handleRangeTranscribe = useCallback(async () => {
     if (!selection || !selectedFileId || !selectedFile || rangeTranscribing) return;
+    const baseResult = allResults[activeResultIndex];
+    if (!baseResult) return;
+
     setRangeTranscribing(true);
     setRangeError(null);
     try {
-      const result = await transcribeAudio({
+      const rangeResult = await transcribeAudio({
         audioFileId: selectedFileId,
         audioPath: selectedFile.path,
         modelName: settings.modelName,
@@ -158,7 +161,28 @@ export function EditorPanel() {
         startSeconds: selection.start,
         endSeconds: selection.end,
       });
-      addResult(selectedFileId, result);
+
+      // 合并：保留与选区无重叠的旧分段 + 新转录分段，按时间排序
+      const kept = baseResult.segments.filter(
+        (s) => s.end <= selection.start || s.start >= selection.end,
+      );
+      const merged = [...kept, ...rangeResult.segments].sort(
+        (a, b) => a.start - b.start,
+      );
+      const mergedText = merged.map((s) => s.text).join("\n");
+
+      rangeResult.segments = merged;
+      rangeResult.text = mergedText;
+      rangeResult.duration = baseResult.duration;
+
+      // 后端已保存了仅含区间分段的原始记录，覆盖更新为合并版本
+      await updateTranscriptionResult({
+        id: rangeResult.id,
+        text: mergedText,
+        segments: merged,
+      });
+
+      addResult(selectedFileId, rangeResult);
       setActiveResultIndex(0);
       setSelection(null);
     } catch (err) {
@@ -166,7 +190,7 @@ export function EditorPanel() {
     } finally {
       setRangeTranscribing(false);
     }
-  }, [selection, selectedFileId, selectedFile, rangeTranscribing, settings, addResult]);
+  }, [selection, selectedFileId, selectedFile, rangeTranscribing, settings, addResult, allResults, activeResultIndex]);
 
   const handleSwitchVersion = useCallback(
     (index: number) => {
