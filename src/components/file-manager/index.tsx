@@ -1,9 +1,10 @@
 import { useState, useCallback } from "react";
 import type { AudioFile } from "@/lib/types";
+import type { FolderNode } from "@/lib/file-tree";
 import { useAudioStore } from "@/stores/audio-store";
 import { Toolbar } from "./toolbar";
 import { FolderTree } from "./folder-tree";
-import { ContextMenu, type ContextMenuState } from "./context-menu";
+import { ContextMenu, type ContextMenuState, FolderContextMenu, type FolderContextMenuState } from "./context-menu";
 import { ImportDropZone } from "./import-drop-zone";
 import { BatchBar } from "./batch-bar";
 import { QueueProgress } from "./queue-progress";
@@ -11,13 +12,24 @@ import { TagEditor } from "./tag-editor";
 
 export function FileManager() {
   const [ctxMenu, setCtxMenu] = useState<ContextMenuState | null>(null);
+  const [folderCtxMenu, setFolderCtxMenu] = useState<FolderContextMenuState | null>(null);
   const [tagEditor, setTagEditor] = useState<{ fileIds: string[]; rect?: DOMRect | null } | null>(null);
   const selectedFileIds = useAudioStore((s) => s.selectedFileIds);
 
   const handleContextMenu = useCallback(
     (e: React.MouseEvent, file: AudioFile) => {
       e.preventDefault();
+      setFolderCtxMenu(null);
       setCtxMenu({ file, x: e.clientX, y: e.clientY });
+    },
+    [],
+  );
+
+  const handleFolderContextMenu = useCallback(
+    (e: React.MouseEvent, folder: FolderNode) => {
+      e.preventDefault();
+      setCtxMenu(null);
+      setFolderCtxMenu({ folder, x: e.clientX, y: e.clientY });
     },
     [],
   );
@@ -39,7 +51,7 @@ export function FileManager() {
     <ImportDropZone>
       <Toolbar />
       <div className="flex-1 overflow-y-auto">
-        <FolderTree onContextMenu={handleContextMenu} />
+        <FolderTree onContextMenu={handleContextMenu} onFolderContextMenu={handleFolderContextMenu} />
       </div>
 
       <div className="flex flex-col gap-2 px-4 pb-3 empty:hidden">
@@ -49,6 +61,10 @@ export function FileManager() {
 
       {ctxMenu && (
         <ContextMenu state={ctxMenu} onClose={() => setCtxMenu(null)} onEditTags={handleEditTags} />
+      )}
+
+      {folderCtxMenu && (
+        <FolderContextMenu state={folderCtxMenu} onClose={() => setFolderCtxMenu(null)} />
       )}
 
       {tagEditor && (

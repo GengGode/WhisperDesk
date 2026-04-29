@@ -7,9 +7,10 @@ import { FileGrid } from "./file-grid";
 
 interface FolderTreeProps {
   onContextMenu: (e: React.MouseEvent, file: AudioFile) => void;
+  onFolderContextMenu: (e: React.MouseEvent, folder: FolderNode) => void;
 }
 
-export function FolderTree({ onContextMenu }: FolderTreeProps) {
+export function FolderTree({ onContextMenu, onFolderContextMenu }: FolderTreeProps) {
   const files = useAudioStore((s) => s.files);
   const searchQuery = useAudioStore((s) => s.searchQuery);
   const sortField = useAudioStore((s) => s.sortField);
@@ -85,7 +86,7 @@ export function FolderTree({ onContextMenu }: FolderTreeProps) {
   return (
     <div className="p-2">
       {tree.children.map((child) => (
-        <FolderNodeView key={child.fullPath} node={child} depth={0} visibleIds={visibleIds} onContextMenu={onContextMenu} />
+        <FolderNodeView key={child.fullPath} node={child} depth={0} visibleIds={visibleIds} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} />
       ))}
       {tree.files.length > 0 && (
         <div className="space-y-0.5">
@@ -103,11 +104,13 @@ function FolderNodeView({
   depth,
   visibleIds,
   onContextMenu,
+  onFolderContextMenu,
 }: {
   node: FolderNode;
   depth: number;
   visibleIds: string[];
   onContextMenu: (e: React.MouseEvent, file: AudioFile) => void;
+  onFolderContextMenu: (e: React.MouseEvent, folder: FolderNode) => void;
 }) {
   const expandedFolders = useAudioStore((s) => s.expandedFolders);
   const toggleFolder = useAudioStore((s) => s.toggleFolder);
@@ -117,6 +120,10 @@ function FolderNodeView({
     <div>
       <button
         onClick={() => toggleFolder(node.fullPath)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onFolderContextMenu(e, node);
+        }}
         className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-surface-secondary"
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
       >
@@ -138,7 +145,7 @@ function FolderNodeView({
       {expanded && (
         <div>
           {node.children.map((child) => (
-            <FolderNodeView key={child.fullPath} node={child} depth={depth + 1} visibleIds={visibleIds} onContextMenu={onContextMenu} />
+            <FolderNodeView key={child.fullPath} node={child} depth={depth + 1} visibleIds={visibleIds} onContextMenu={onContextMenu} onFolderContextMenu={onFolderContextMenu} />
           ))}
           <div className="space-y-0.5" style={{ paddingLeft: `${(depth + 1) * 16}px` }}>
             {node.files.map((file) => (

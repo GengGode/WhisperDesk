@@ -5,6 +5,7 @@ import { deleteAudioFile, toggleStar } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import type { AudioFile } from "@/lib/types";
+import type { FolderNode } from "@/lib/file-tree";
 
 export interface ContextMenuState {
   file: AudioFile;
@@ -133,6 +134,125 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
           className={`flex w-full items-center px-3 py-2 text-left text-sm transition-colors ${
             item.danger ? "text-red-500 hover:bg-red-500/10" : "hover:bg-surface-secondary"
           }`}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+// ---- 文件夹右键菜单 ----
+
+export interface FolderContextMenuState {
+  folder: FolderNode;
+  x: number;
+  y: number;
+}
+
+interface FolderContextMenuProps {
+  state: FolderContextMenuState;
+  onClose: () => void;
+}
+
+/** 递归收集文件夹下所有音频文件 */
+function collectAllFiles(node: FolderNode): AudioFile[] {
+  const result: AudioFile[] = [...node.files];
+  for (const child of node.children) {
+    result.push(...collectAllFiles(child));
+  }
+  return result;
+}
+
+export function FolderContextMenu({ state, onClose }: FolderContextMenuProps) {
+  const menuRef = useRef<HTMLDivElement>(null);
+  const enqueueFiles = useTranscriptionStore((s) => s.enqueueFiles);
+  const queueRunning = useTranscriptionStore((s) => s.queueRunning);
+  const setQueueRunning = useTranscriptionStore((s) => s.setQueueRunning);
+  const toggleSelect = useAudioStore((s) => s.toggleSelect);
+  const selectedFileIds = useAudioStore((s) => s.selectedFileIds);
+
+  useEffect(() => {
+    function handleDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) onClose();
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleDown);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleDown);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  useEffect(() => {
+    if (!menuRef.current) return;
+    const rect = menuRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    let x = state.x;
+    let y = state.y;
+    if (x + rect.width > vw) x = vw - rect.width - 4;
+    if (y + rect.height > vh) y = vh - rect.height - 4;
+    menuRef.current.style.left = `${x}px`;
+    menuRef.current.style.top = `${y}px`;
+  });
+
+  const allFiles = collectAllFiles(state.folder);
+
+  const items: { label: string; action: () => void }[] = [
+    {
+      label: `批量转录（${allFiles.length} 个文件）`,
+      action: () => {
+        onClose();
+        const pending = allFiles
+          .filter((f) => f.transcriptionStatus !== "transcribing")
+          .map((f) => f.id);
+        if (pending.length === 0) return;
+        enqueueFiles(pending);
+        if (!queueRunning) setQueueRunning(true);
+      },
+    },
+    {
+      label: "全选此文件夹",
+      action: () => {
+        onClose();
+        for (const f of allFiles) {
+          if (!selectedFileIds.has(f.id)) toggleSelect(f.id);
+        }
+      },
+    },
+    {
+      label: "在资源管理器中显示",
+      action: async () => {
+        onClose();
+        const target = allFiles[0]?.path ?? state.folder.fullPath;
+        try {
+          await revealItemInDir(target);
+        } catch (err) {
+          console.error("[文件夹] 打开资源管理器失败", err);
+        }
+      },
+    },
+  ];
+
+  return createPortal(
+    <div
+      ref={menuRef}
+      className="fixed z-50 min-w-[180px] overflow-hidden rounded-lg border border-border bg-surface shadow-lg"
+      style={{ left: state.x, top: state.y }}
+    >
+      <div className="border-b border-border px-3 py-1.5 text-xs text-text-secondary truncate">
+        {state.folder.name}
+      </div>
+      {items.map((item, i) => (
+        <button
+          key={i}
+          onClick={item.action}
+          className="flex w-full items-center px-3 py-2 text-left text-sm transition-colors hover:bg-surface-secondary"
         >
           {item.label}
         </button>
