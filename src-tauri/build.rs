@@ -5,6 +5,7 @@ fn main() {
     {
         compile_delay_hook();
         setup_cuda_delay_load();
+        setup_sherpa_delay_load();
         fix_crt_conflict();
     }
 }
@@ -20,13 +21,15 @@ fn fix_crt_conflict() {
 /// 编译 C 延迟加载失败钩子（覆盖 delayimp.lib 中默认的 NULL）
 #[cfg(target_os = "windows")]
 fn compile_delay_hook() {
-    if std::env::var("CARGO_FEATURE_CUDA").is_err() {
+    let has_cuda = std::env::var("CARGO_FEATURE_CUDA").is_ok();
+    let has_sherpa = std::env::var("CARGO_FEATURE_SHERPA_ONNX_BACKEND").is_ok();
+    if !has_cuda && !has_sherpa {
         return;
     }
     cc::Build::new()
         .file("src/delay_hook.c")
         .compile("delay_hook");
-    println!("cargo:warning=已编译 CUDA 延迟加载失败钩子 (delay_hook.c)");
+    println!("cargo:warning=已编译延迟加载失败钩子 (delay_hook.c)");
 }
 
 /// 在 Windows + cuda feature 下，为所有 CUDA DLL 设置延迟加载。
@@ -35,7 +38,6 @@ fn compile_delay_hook() {
 fn setup_cuda_delay_load() {
     use std::path::PathBuf;
 
-    // 仅在 cuda feature 启用时才需要延迟加载
     if std::env::var("CARGO_FEATURE_CUDA").is_err() {
         return;
     }
@@ -54,7 +56,6 @@ fn setup_cuda_delay_load() {
         return;
     }
 
-    // 扫描 CUDA bin 目录，找出需要延迟加载的 DLL（带版本号，如 cublas64_12.dll）
     let prefixes = ["cublas64_", "cublasLt64_", "cudart64_"];
     let mut delay_loaded = Vec::new();
 
@@ -74,15 +75,45 @@ fn setup_cuda_delay_load() {
         }
     }
 
-    // nvcuda.dll 由 NVIDIA 驱动提供，文件名固定
     println!("cargo:rustc-link-arg-bins=/DELAYLOAD:nvcuda.dll");
     delay_loaded.push("nvcuda.dll".to_string());
 
-    // 链接 MSVC 延迟加载辅助库
     println!("cargo:rustc-link-lib=delayimp");
 
     println!(
         "cargo:warning=已配置 CUDA 延迟加载: {:?}",
         delay_loaded
+    );
+}
+
+/// 为 sherpa-onnx 相关 DLL 设置延迟加载。
+/// 使程序在缺少 sherpa-onnx DLL 时仍能启动，而非弹出系统错误对话框。
+/// 运行时通过 cuda.rs 的 detect_sherpa_available() 检测可用性并在 UI 上禁用。
+#[cfg(target_os = "windows")]
+fn setup_sherpa_delay_load() {
+    if std::env::var("CARGO_FEATURE_SHERPA_ONNX_BACKEND").is_err() {
+        return;
+    }
+
+    let sherpa_dlls = [
+        "sherpa-onnx-c-api.dll",
+        "sherpa-onnx-cxx-api.dll",
+        "onnxruntime.dll",
+        "onnxruntime_providers_shared.dll",
+        "onnxruntime_providers_cuda.dll",
+        "onnxruntime_providers_tensorrt.dll",
+        "cargs.dll",
+    ];
+
+    for dll in &sherpa_dlls {
+        println!("cargo:rustc-link-arg-bins=/DELAYLOAD:{dll}");
+    }
+
+    // delayimp 可能已被 CUDA 延迟加载添加过，重复链接无副作用
+    println!("cargo:rustc-link-lib=delayimp");
+
+    println!(
+        "cargo:warning=已配置 sherpa-onnx 延迟加载: {:?}",
+        sherpa_dlls
     );
 }
