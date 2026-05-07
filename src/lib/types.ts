@@ -43,13 +43,22 @@ export interface TranscriptionSegment {
   text: string;
 }
 
-/** Whisper 模型信息 */
+/** 转录后端标识 */
+export type TranscriptionBackend = "whisper" | "sherpa-onnx";
+
+/** 模型信息（支持多后端） */
 export interface WhisperModel {
   name: string;
   /** 文件大小（字节） */
   size: number;
   downloaded: boolean;
   path: string;
+  /** 所属后端/类型标识 */
+  backend: TranscriptionBackend | "punctuation";
+  /** sherpa-onnx 模型架构类型 */
+  modelType?: string;
+  /** 参考字错误率 */
+  cer?: string;
 }
 
 /** 转录任务进度 */
@@ -75,6 +84,8 @@ export interface TranscriptionRequest {
   threads?: number;
   useGpu?: boolean;
   remoteUrl?: string;
+  /** 转录后端，不传时根据 modelName 自动推断 */
+  backend?: TranscriptionBackend;
 
   // Whisper 推理参数
   bestOf?: number;
@@ -99,6 +110,13 @@ export interface TranscriptionRequest {
 
   // Prompt 引导
   initialPrompt?: string;
+
+  // 标点恢复
+  /** 启用标点恢复后处理（对无标点的 ASR 输出自动补充标点） */
+  enablePunctuation?: boolean;
+
+  /** 模型下载代理（http/https/socks5） */
+  downloadProxy?: string;
 }
 
 // ── VAD 相关类型 ──
@@ -151,6 +169,8 @@ export type ThemeMode = "light" | "dark" | "system";
 
 export interface AppSettings {
   theme: ThemeMode;
+  /** 当前选用的转录后端 */
+  backend: TranscriptionBackend;
   modelName: string;
   language: string;
   threads: number;
@@ -183,6 +203,13 @@ export interface AppSettings {
 
   // Prompt 引导
   initialPrompt: string;
+
+  // 标点恢复
+  /** 启用标点恢复后处理 */
+  enablePunctuation: boolean;
+
+  /** 模型下载代理地址，留空则不使用代理（支持 http/https/socks5） */
+  downloadProxy: string;
 }
 
 /** 推理服务运行状态 */
@@ -195,6 +222,12 @@ export interface ServerStatus {
 export interface CudaInfo {
   available: boolean;
   message: string;
+  /** sherpa-onnx GPU provider 状态描述 */
+  sherpaGpu?: string;
+  /** sherpa-onnx 后端 DLL 是否在运行时可加载 */
+  sherpaAvailable: boolean;
+  /** sherpa-onnx 不可用时的原因描述 */
+  sherpaMessage?: string;
 }
 
 /** Dashboard 任务信息 */

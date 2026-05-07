@@ -319,10 +319,12 @@ pub fn get_transcription_results(
 pub async fn ensure_model(
     window: Window,
     model_name: String,
+    proxy: Option<String>,
 ) -> Result<String, AppError> {
     let service = TranscriberService::portable()?;
+    let proxy_ref = proxy.as_deref().filter(|s| !s.is_empty());
     let path = service
-        .ensure_model(make_model_dl_cb(&window), make_log_cb(&window), &model_name)
+        .ensure_model(make_model_dl_cb(&window), make_log_cb(&window), &model_name, proxy_ref)
         .await?;
     Ok(path.to_string_lossy().to_string())
 }
@@ -459,11 +461,7 @@ pub fn open_models_dir(app: AppHandle) -> Result<(), AppError> {
 #[tauri::command]
 pub fn delete_model(model_name: String) -> Result<(), AppError> {
     let service = TranscriberService::portable()?;
-    let path = service.model_path(&model_name);
-    if path.exists() {
-        std::fs::remove_file(&path)?;
-    }
-    Ok(())
+    service.delete_model(&model_name)
 }
 
 #[tauri::command]

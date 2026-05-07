@@ -182,6 +182,7 @@ export function EditorPanel() {
         threads: settings.threads,
         useGpu: settings.useGpu,
         remoteUrl: settings.remoteUrl || undefined,
+        backend: settings.backend,
         bestOf: settings.bestOf,
         suppressBlank: settings.suppressBlank,
         suppressNst: settings.suppressNst,
@@ -196,6 +197,7 @@ export function EditorPanel() {
         enableVad: settings.enableVad,
         vadConfig: settings.vadConfig,
         initialPrompt: settings.initialPrompt || undefined,
+        enablePunctuation: settings.enablePunctuation,
         startSeconds: selection.start,
         endSeconds: selection.end,
       });

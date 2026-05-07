@@ -1,27 +1,23 @@
+//! 转录服务：模型管理 + 引擎分发 + 后处理
+
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use reqwest::Client;
 use tokio::io::AsyncWriteExt;
-#[cfg(feature = "whisper-rs-backend")]
-use whisper_rs::{
-    install_logging_hooks, FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters,
-};
 
 use serde::Serialize;
 
-use crate::models::audio::{TranscriptionRequest, TranscriptionResult, VadConfig};
+use crate::models::audio::{
+    TranscriptionBackend, TranscriptionRequest, TranscriptionResult, TranscriptionSegment,
+    SherpaModelType,
+};
 use crate::models::error::AppError;
-use crate::services::paths;
-#[cfg(feature = "whisper-rs-backend")]
 use crate::services::audio::{decode_to_16k_mono, decode_range_to_16k_mono};
-#[cfg(feature = "whisper-rs-backend")]
-use chrono::Utc;
-#[cfg(feature = "whisper-rs-backend")]
-use crate::models::audio::TranscriptionSegment;
-#[cfg(feature = "whisper-rs-backend")]
-use crate::services::vad;
+use crate::services::paths;
+
+// ── 模型信息 ──
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +26,63 @@ pub struct ModelInfo {
     pub downloaded: bool,
     pub size: u64,
     pub path: String,
+    /// 转录后端标识
+    pub backend: String,
+    /// sherpa-onnx 模型架构类型（仅 sherpa 后端有值）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_type: Option<String>,
+    /// 参考 CER（字错误率），用于前端展示
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cer: Option<String>,
 }
+
+// ── sherpa-onnx 模型注册表 ──
+
+struct SherpaModelEntry {
+    name: &'static str,
+    dir_name: &'static str,
+    model_type: SherpaModelType,
+    download_url: &'static str,
+    cer: &'static str,
+    /// 模型就绪的标志文件（相对于模型目录）
+    marker_file: &'static str,
+}
+
+// ── 标点恢复模型 ──
+
+const PUNCT_MODEL_DIR_NAME: &str = "sherpa-punct-ct-transformer-zh-en";
+const PUNCT_MODEL_DOWNLOAD_URL: &str =
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/punctuation-models/sherpa-onnx-punct-ct-transformer-zh-en-vocab272727-2024-04-12-int8.tar.bz2";
+const PUNCT_MODEL_MARKER: &str = "model.int8.onnx";
+
+const SHERPA_MODELS: &[SherpaModelEntry] = &[
+    SherpaModelEntry {
+        name: "paraformer-zh",
+        dir_name: "sherpa-paraformer-zh",
+        model_type: SherpaModelType::Paraformer,
+        download_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-paraformer-zh-2024-03-09.tar.bz2",
+        cer: "1.95%",
+        marker_file: "model.int8.onnx",
+    },
+    SherpaModelEntry {
+        name: "sensevoice-zh",
+        dir_name: "sherpa-sensevoice-zh",
+        model_type: SherpaModelType::SenseVoice,
+        download_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17.tar.bz2",
+        cer: "~3.0%",
+        marker_file: "model.int8.onnx",
+    },
+    SherpaModelEntry {
+        name: "fireredasr2-zh",
+        dir_name: "sherpa-fireredasr2-zh",
+        model_type: SherpaModelType::FireRedAsr,
+        download_url: "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-fire-red-asr2-zh_en-int8-2026-02-26.tar.bz2",
+        cer: "0.57%",
+        marker_file: "encoder.int8.onnx",
+    },
+];
+
+// ── 转录服务 ──
 
 pub struct TranscriberService {
     model_dir: PathBuf,
@@ -43,26 +95,219 @@ impl TranscriberService {
         })
     }
 
-    pub fn model_path(&self, model_name: &str) -> PathBuf {
+    // ── Whisper 模型路径 ──
+
+    pub fn whisper_model_path(&self, model_name: &str) -> PathBuf {
         self.model_dir.join(format!("ggml-{model_name}.bin"))
     }
 
-    /// 最小合法模型文件大小（10 MB），低于此值视为下载失败
-    const MIN_MODEL_BYTES: u64 = 10 * 1024 * 1024;
+    // ── sherpa-onnx 模型路径 ──
 
-    /// 确保模型文件已下载，不足则自动下载。
-    /// `on_model_progress(model_name, progress_0_to_1)` 在下载过程中回调。
-    pub async fn ensure_model<M, L>(
+    fn sherpa_model_dir(&self, model_name: &str) -> PathBuf {
+        if let Some(entry) = SHERPA_MODELS.iter().find(|e| e.name == model_name) {
+            self.model_dir.join(entry.dir_name)
+        } else {
+            self.model_dir.join(format!("sherpa-{model_name}"))
+        }
+    }
+
+    fn is_sherpa_model(model_name: &str) -> bool {
+        SHERPA_MODELS.iter().any(|e| e.name == model_name)
+    }
+
+    /// 获取 sherpa 模型的类型信息
+    pub fn sherpa_model_type(model_name: &str) -> Option<SherpaModelType> {
+        SHERPA_MODELS.iter().find(|e| e.name == model_name).map(|e| e.model_type.clone())
+    }
+
+    // ── 标点恢复模型路径 ──
+
+    pub fn punct_model_dir(&self) -> PathBuf {
+        self.model_dir.join(PUNCT_MODEL_DIR_NAME)
+    }
+
+    /// 标点恢复模型 ONNX 文件路径
+    pub fn punct_model_onnx_path(&self) -> PathBuf {
+        self.punct_model_dir().join(PUNCT_MODEL_MARKER)
+    }
+
+    pub fn is_punct_model_ready(&self) -> bool {
+        self.punct_model_onnx_path().exists()
+    }
+
+    pub async fn ensure_punct_model<M, L>(
         &self,
         on_model_progress: M,
         on_log: L,
-        model_name: &str,
+        proxy: Option<&str>,
     ) -> Result<PathBuf, AppError>
     where
         M: Fn(&str, f32) + Clone + Send + 'static,
         L: Fn(&str) + Clone + Send + 'static,
     {
-        let path = self.model_path(model_name);
+        let dir = self.punct_model_dir();
+        let marker = dir.join(PUNCT_MODEL_MARKER);
+
+        if marker.exists() {
+            on_log(&format!("[标点] 标点恢复模型已就绪: {}", dir.display()));
+            return Ok(dir);
+        }
+
+        on_log(&format!("[标点] 开始下载标点恢复模型: {PUNCT_MODEL_DOWNLOAD_URL}"));
+
+        let tmp_archive = self.model_dir.join(format!("{PUNCT_MODEL_DIR_NAME}.tar.bz2"));
+        self.download_single_file(
+            PUNCT_MODEL_DOWNLOAD_URL, &tmp_archive,
+            on_model_progress.clone(), on_log.clone(),
+            "punct-zh-en", proxy,
+        ).await?;
+
+        on_log("[标点] 正在解压标点模型...");
+        on_model_progress("punct-zh-en", 0.99);
+
+        let target_dir = dir.clone();
+        let archive_path = tmp_archive.clone();
+        tokio::task::spawn_blocking(move || {
+            Self::extract_tar_bz2(&archive_path, &target_dir)
+        })
+        .await
+        .map_err(|e| AppError::Transcription(format!("解压线程错误: {e}")))?
+        .map_err(|e| AppError::Transcription(format!("解压标点模型失败: {e}")))?;
+
+        let _ = std::fs::remove_file(&tmp_archive);
+
+        if !marker.exists() {
+            return Err(AppError::Transcription(format!(
+                "标点模型解压后未找到标志文件: {}", marker.display()
+            )));
+        }
+
+        on_log(&format!("[标点] 标点恢复模型就绪: {}", dir.display()));
+        on_model_progress("punct-zh-en", 1.0);
+        Ok(dir)
+    }
+
+    /// 根据 model_name 推断后端
+    pub fn infer_backend(model_name: &str) -> TranscriptionBackend {
+        if Self::is_sherpa_model(model_name) {
+            TranscriptionBackend::SherpaOnnx
+        } else {
+            TranscriptionBackend::Whisper
+        }
+    }
+
+    // ── 模型大小常量 ──
+
+    const MIN_MODEL_BYTES: u64 = 10 * 1024 * 1024;
+
+    // ── 模型列表 ──
+
+    pub fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
+        let mut models = Vec::new();
+
+        // Whisper GGML 模型
+        let whisper_known = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"];
+        for name in &whisper_known {
+            let path = self.whisper_model_path(name);
+            let (downloaded, size) = if path.exists() {
+                let sz = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                (sz >= Self::MIN_MODEL_BYTES, sz)
+            } else {
+                (false, 0)
+            };
+            models.push(ModelInfo {
+                name: name.to_string(),
+                downloaded,
+                size,
+                path: path.to_string_lossy().to_string(),
+                backend: "whisper".to_string(),
+                model_type: None,
+                cer: None,
+            });
+        }
+
+        // sherpa-onnx 模型
+        for entry in SHERPA_MODELS {
+            let dir = self.model_dir.join(entry.dir_name);
+            let marker = dir.join(entry.marker_file);
+            let (downloaded, size) = if marker.exists() {
+                let sz = dir_total_size(&dir);
+                (true, sz)
+            } else {
+                (false, 0)
+            };
+            models.push(ModelInfo {
+                name: entry.name.to_string(),
+                downloaded,
+                size,
+                path: dir.to_string_lossy().to_string(),
+                backend: "sherpa-onnx".to_string(),
+                model_type: Some(format!("{:?}", entry.model_type).to_lowercase()),
+                cer: Some(entry.cer.to_string()),
+            });
+        }
+
+        // 标点恢复模型
+        {
+            let dir = self.punct_model_dir();
+            let marker = dir.join(PUNCT_MODEL_MARKER);
+            let (downloaded, size) = if marker.exists() {
+                let sz = dir_total_size(&dir);
+                (true, sz)
+            } else {
+                (false, 0)
+            };
+            models.push(ModelInfo {
+                name: "punct-zh-en".to_string(),
+                downloaded,
+                size,
+                path: dir.to_string_lossy().to_string(),
+                backend: "punctuation".to_string(),
+                model_type: Some("ct-transformer".to_string()),
+                cer: None,
+            });
+        }
+
+        Ok(models)
+    }
+
+    // ── 模型下载 / 确保就绪 ──
+
+    pub async fn ensure_model<M, L>(
+        &self,
+        on_model_progress: M,
+        on_log: L,
+        model_name: &str,
+        proxy: Option<&str>,
+    ) -> Result<PathBuf, AppError>
+    where
+        M: Fn(&str, f32) + Clone + Send + 'static,
+        L: Fn(&str) + Clone + Send + 'static,
+    {
+        if let Some(p) = proxy {
+            on_log(&format!("[模型] 使用代理: {p}"));
+        }
+        if model_name == "punct-zh-en" {
+            self.ensure_punct_model(on_model_progress, on_log, proxy).await
+        } else if Self::is_sherpa_model(model_name) {
+            self.ensure_sherpa_model(on_model_progress, on_log, model_name, proxy).await
+        } else {
+            self.ensure_whisper_model(on_model_progress, on_log, model_name, proxy).await
+        }
+    }
+
+    async fn ensure_whisper_model<M, L>(
+        &self,
+        on_model_progress: M,
+        on_log: L,
+        model_name: &str,
+        proxy: Option<&str>,
+    ) -> Result<PathBuf, AppError>
+    where
+        M: Fn(&str, f32) + Clone + Send + 'static,
+        L: Fn(&str) + Clone + Send + 'static,
+    {
+        let path = self.whisper_model_path(model_name);
         if path.exists() {
             let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
             if size >= Self::MIN_MODEL_BYTES {
@@ -75,37 +320,143 @@ impl TranscriberService {
             let _ = std::fs::remove_file(&path);
         }
 
-        self.download_model(on_model_progress, on_log, model_name, &path)
-            .await?;
+        let url = format!(
+            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin"
+        );
+        self.download_single_file(&url, &path, on_model_progress, on_log, model_name, proxy).await?;
         Ok(path)
     }
 
-    async fn download_model<M, L>(
+    async fn ensure_sherpa_model<M, L>(
         &self,
         on_model_progress: M,
         on_log: L,
         model_name: &str,
+        proxy: Option<&str>,
+    ) -> Result<PathBuf, AppError>
+    where
+        M: Fn(&str, f32) + Clone + Send + 'static,
+        L: Fn(&str) + Clone + Send + 'static,
+    {
+        let entry = SHERPA_MODELS.iter().find(|e| e.name == model_name)
+            .ok_or_else(|| AppError::Transcription(format!("未知 sherpa 模型: {model_name}")))?;
+
+        let dir = self.model_dir.join(entry.dir_name);
+        let marker = dir.join(entry.marker_file);
+
+        if marker.exists() {
+            on_log(&format!("[模型] sherpa 模型已就绪: {}", dir.display()));
+            return Ok(dir);
+        }
+
+        on_log(&format!("[模型] 开始下载 sherpa 模型: {}", entry.download_url));
+
+        // 下载 tar.bz2 到临时文件
+        let tmp_archive = self.model_dir.join(format!("{}.tar.bz2", entry.dir_name));
+        self.download_single_file(entry.download_url, &tmp_archive, on_model_progress.clone(), on_log.clone(), model_name, proxy).await?;
+
+        // 解压到模型目录
+        on_log("[模型] 正在解压模型...");
+        on_model_progress(model_name, 0.99);
+
+        let target_dir = dir.clone();
+        let archive_path = tmp_archive.clone();
+        tokio::task::spawn_blocking(move || {
+            Self::extract_tar_bz2(&archive_path, &target_dir)
+        })
+        .await
+        .map_err(|e| AppError::Transcription(format!("解压线程错误: {e}")))?
+        .map_err(|e| AppError::Transcription(format!("解压模型失败: {e}")))?;
+
+        let _ = std::fs::remove_file(&tmp_archive);
+
+        if !marker.exists() {
+            return Err(AppError::Transcription(format!(
+                "模型解压后未找到标志文件: {}",
+                marker.display()
+            )));
+        }
+
+        on_log(&format!("[模型] sherpa 模型就绪: {}", dir.display()));
+        on_model_progress(model_name, 1.0);
+        Ok(dir)
+    }
+
+    /// 解压 tar.bz2，将内部顶级目录的内容平铺到 target_dir
+    fn extract_tar_bz2(archive: &Path, target_dir: &Path) -> Result<(), String> {
+        use std::io::Read;
+
+        let file = std::fs::File::open(archive)
+            .map_err(|e| format!("打开压缩包失败: {e}"))?;
+        let decompressor = bzip2::read::BzDecoder::new(file);
+        let mut archive = tar::Archive::new(decompressor);
+
+        std::fs::create_dir_all(target_dir)
+            .map_err(|e| format!("创建目录失败: {e}"))?;
+
+        // sherpa-onnx 模型包内通常有一层顶级目录，需要剥离
+        for entry in archive.entries().map_err(|e| format!("读取 tar 条目失败: {e}"))? {
+            let mut entry = entry.map_err(|e| format!("读取条目失败: {e}"))?;
+            let raw_path = entry.path().map_err(|e| format!("读取路径失败: {e}"))?.to_path_buf();
+
+            // 跳过顶级目录名（第一个路径分量）
+            let components: Vec<_> = raw_path.components().collect();
+            if components.len() <= 1 {
+                continue;
+            }
+            let relative: PathBuf = components[1..].iter().collect();
+            let dest = target_dir.join(&relative);
+
+            if entry.header().entry_type().is_dir() {
+                std::fs::create_dir_all(&dest)
+                    .map_err(|e| format!("创建子目录失败: {e}"))?;
+            } else {
+                if let Some(parent) = dest.parent() {
+                    std::fs::create_dir_all(parent)
+                        .map_err(|e| format!("创建父目录失败: {e}"))?;
+                }
+                let mut buf = Vec::new();
+                entry.read_to_end(&mut buf)
+                    .map_err(|e| format!("读取文件内容失败: {e}"))?;
+                std::fs::write(&dest, &buf)
+                    .map_err(|e| format!("写入文件失败: {e}"))?;
+            }
+        }
+
+        Ok(())
+    }
+
+    async fn download_single_file<M, L>(
+        &self,
+        url: &str,
         target: &Path,
+        on_model_progress: M,
+        on_log: L,
+        model_name: &str,
+        proxy: Option<&str>,
     ) -> Result<(), AppError>
     where
         M: Fn(&str, f32) + Send + 'static,
         L: Fn(&str) + Send + 'static,
     {
-        let url = format!(
-            "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-{model_name}.bin"
-        );
         on_log(&format!("[模型] 开始下载: {url}"));
 
-        let client = Client::builder()
+        let mut builder = Client::builder()
             .user_agent("WhisperDesk/0.1")
-            .redirect(reqwest::redirect::Policy::limited(10))
+            .redirect(reqwest::redirect::Policy::limited(10));
+
+        if let Some(proxy_url) = proxy {
+            let p = reqwest::Proxy::all(proxy_url)
+                .map_err(|e| AppError::Transcription(format!("代理地址无效 ({proxy_url}): {e}")))?;
+            builder = builder.proxy(p);
+            on_log(&format!("[模型] 已配置下载代理: {proxy_url}"));
+        }
+
+        let client = builder
             .build()
             .map_err(|e| AppError::Transcription(format!("创建 HTTP 客户端失败: {e}")))?;
 
-        let resp = client
-            .get(&url)
-            .send()
-            .await
+        let resp = client.get(url).send().await
             .map_err(|e| AppError::Transcription(format!("请求模型下载失败: {e}")))?;
 
         let status = resp.status();
@@ -120,23 +471,23 @@ impl TranscriberService {
         let mut downloaded: u64 = 0;
         let mut stream = resp;
 
-        let mut file = tokio::fs::File::create(target)
-            .await
-            .map_err(|e| AppError::FileSystem(format!("创建模型文件失败: {e}")))?;
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
 
-        while let Some(chunk) = stream
-            .chunk()
-            .await
+        let mut file = tokio::fs::File::create(target).await
+            .map_err(|e| AppError::FileSystem(format!("创建文件失败: {e}")))?;
+
+        while let Some(chunk) = stream.chunk().await
             .map_err(|e| {
                 let _ = std::fs::remove_file(target);
-                AppError::Transcription(format!("下载模型分片失败: {e}"))
+                AppError::Transcription(format!("下载分片失败: {e}"))
             })?
         {
-            file.write_all(&chunk)
-                .await
+            file.write_all(&chunk).await
                 .map_err(|e| {
                     let _ = std::fs::remove_file(target);
-                    AppError::FileSystem(format!("写入模型文件失败: {e}"))
+                    AppError::FileSystem(format!("写入文件失败: {e}"))
                 })?;
             downloaded += chunk.len() as u64;
 
@@ -163,34 +514,30 @@ impl TranscriberService {
         Ok(())
     }
 
-    pub fn list_models(&self) -> Result<Vec<ModelInfo>, AppError> {
-        let mut models = Vec::new();
-        let known = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"];
+    // ── 删除模型 ──
 
-        for name in &known {
-            let path = self.model_path(name);
-            let (downloaded, size) = if path.exists() {
-                let sz = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                (sz >= Self::MIN_MODEL_BYTES, sz)
-            } else {
-                (false, 0)
-            };
-            models.push(ModelInfo {
-                name: name.to_string(),
-                downloaded,
-                size,
-                path: path.to_string_lossy().to_string(),
-            });
+    pub fn delete_model(&self, model_name: &str) -> Result<(), AppError> {
+        if model_name == "punct-zh-en" {
+            let dir = self.punct_model_dir();
+            if dir.exists() {
+                std::fs::remove_dir_all(&dir)?;
+            }
+        } else if Self::is_sherpa_model(model_name) {
+            let dir = self.sherpa_model_dir(model_name);
+            if dir.exists() {
+                std::fs::remove_dir_all(&dir)?;
+            }
+        } else {
+            let path = self.whisper_model_path(model_name);
+            if path.exists() {
+                std::fs::remove_file(&path)?;
+            }
         }
-
-        Ok(models)
+        Ok(())
     }
 
-    /// 执行 whisper 推理。
-    /// - `on_progress(progress_0_to_1, message)` 推理进度回调
-    /// - `on_model_progress(model_name, progress_0_to_1)` 模型下载进度回调
-    /// - `on_log(message)` 日志回调，转发到前端界面
-    /// - `abort_flag` 为 true 时中止推理
+    // ── 转录入口 ──
+
     pub async fn transcribe<P, M, L>(
         &self,
         on_progress: P,
@@ -204,22 +551,15 @@ impl TranscriberService {
         M: Fn(&str, f32) + Clone + Send + 'static,
         L: Fn(&str) + Clone + Send + 'static,
     {
-        #[cfg(not(feature = "whisper-rs-backend"))]
-        {
-            on_progress(1.0, "未启用 whisper-rs-backend 功能");
-            let _ = (on_model_progress, on_log, abort_flag);
-            return Err(AppError::Transcription(
-                "当前构建未启用 whisper-rs-backend。若需真实推理，请安装 LLVM/Clang 并使用 `cargo check --features whisper-rs-backend` 构建。".to_string(),
-            ));
-        }
+        let backend = request.backend.clone()
+            .unwrap_or_else(|| Self::infer_backend(&request.model_name));
 
-        #[cfg(feature = "whisper-rs-backend")]
-        {
-        install_logging_hooks();
+        on_log(&format!("[转录] 后端: {:?}, 模型: {}", backend, request.model_name));
 
         let model_path = self
-            .ensure_model(on_model_progress, on_log.clone(), &request.model_name)
+            .ensure_model(on_model_progress.clone(), on_log.clone(), &request.model_name, request.download_proxy.as_deref())
             .await?;
+
         let (decoded, time_offset) = match (request.start_seconds, request.end_seconds) {
             (Some(start), Some(end)) => {
                 on_log(&format!("[推理] 区间转录模式: {start:.2}s ~ {end:.2}s"));
@@ -232,386 +572,177 @@ impl TranscriberService {
         on_log("[推理] 音频解码完成");
         on_progress(0.05, "音频解码完成");
 
-        let requested_gpu = request.use_gpu.unwrap_or(true);
-        let cuda_ok = super::cuda::is_cuda_available();
-        let use_gpu = requested_gpu && cuda_ok;
-        if requested_gpu && !cuda_ok {
-            on_log("[推理] 用户请求 GPU 但 CUDA 不可用，自动回退 CPU");
-            on_progress(0.03, "CUDA 不可用，使用 CPU 推理");
-        }
-        on_log(&format!(
-            "[推理] use_gpu = {use_gpu} (requested={requested_gpu}, cuda_available={cuda_ok})"
-        ));
+        let audio_file_id = request.audio_file_id.clone();
+        let model_name = request.model_name.clone();
+        let req_language = request.language.clone();
+        let duration = decoded.duration_seconds;
+        let samples = decoded.samples_16k_mono;
+        let max_repeat_filter = request.max_repeat_filter.unwrap_or(3);
+
+        // 标点恢复：sherpa 后端 + 用户启用时预下载标点模型
+        let enable_punct = request.enable_punctuation.unwrap_or(true)
+            && backend == TranscriptionBackend::SherpaOnnx;
+        let punct_model_path = if enable_punct {
+            match self.ensure_punct_model(on_model_progress.clone(), on_log.clone(), request.download_proxy.as_deref()).await {
+                Ok(dir) => {
+                    let onnx = dir.join(PUNCT_MODEL_MARKER);
+                    Some(onnx.to_string_lossy().to_string())
+                }
+                Err(e) => {
+                    on_log(&format!("[标点] 标点模型下载失败，跳过标点恢复: {e}"));
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let model_path_str = model_path
             .to_str()
             .ok_or_else(|| AppError::Transcription("模型路径非法".to_string()))?
             .to_string();
-        let mut samples = decoded.samples_16k_mono;
-        super::audio::normalize_peak(&mut samples);
-        let n_threads = request.threads.unwrap_or(4) as i32;
-        let language = request.language.clone();
-        let audio_file_id = request.audio_file_id.clone();
-        let model_name = request.model_name.clone();
-        let req_language = request.language.clone();
-        let duration = decoded.duration_seconds;
 
-        let best_of = request.best_of.unwrap_or(5).clamp(1, 8);
-        let suppress_blank = request.suppress_blank.unwrap_or(true);
-        let suppress_nst = request.suppress_nst.unwrap_or(true);
-        let no_context = request.no_context.unwrap_or(true);
-        let entropy_thold = request.entropy_thold.unwrap_or(2.4).clamp(0.0, 10.0);
-        let logprob_thold = request.logprob_thold.unwrap_or(-1.0).clamp(-5.0, 0.0);
-        let no_speech_thold = request.no_speech_thold.unwrap_or(0.6).clamp(0.0, 1.0);
-        let temperature = request.temperature.unwrap_or(0.0).clamp(0.0, 1.0);
-        let temperature_inc = request.temperature_inc.unwrap_or(0.2).clamp(0.0, 1.0);
-        let max_initial_ts = request.max_initial_ts.unwrap_or(1.0).clamp(0.0, 1.0);
-        let max_repeat_filter = request.max_repeat_filter.unwrap_or(3);
-        let time_offset = time_offset;
-
-        let enable_vad = request.enable_vad.unwrap_or(true);
-        let vad_config = request.vad_config.clone().unwrap_or_else(VadConfig::default);
-        let initial_prompt = request.initial_prompt.clone();
-
-        on_log(&format!(
-            "[推理] 参数: best_of={best_of}, threads={n_threads}, gpu={use_gpu}, \
-             suppress_blank={suppress_blank}, suppress_nst={suppress_nst}, no_context={no_context}, \
-             entropy={entropy_thold}, logprob={logprob_thold}, no_speech={no_speech_thold}, \
-             temp={temperature}, temp_inc={temperature_inc}, max_init_ts={max_initial_ts}, \
-             vad={enable_vad}, prompt={:?}, samples={}, lang={:?}",
-            initial_prompt.as_deref().map(|s| if s.len() > 30 { &s[..30] } else { s }),
-            samples.len(), language
-        ));
-
-        // 将整个 whisper 推理放到独立 OS 线程，避免阻塞 tokio async runtime
-        let (tx, rx) = tokio::sync::oneshot::channel();
+        let request_clone = request.clone();
         let progress_cb = on_progress.clone();
         let log_cb = on_log.clone();
+        let flag = abort_flag.clone();
+
+        // 在独立 OS 线程执行推理，避免阻塞 tokio
+        let (tx, rx) = tokio::sync::oneshot::channel();
 
         std::thread::spawn(move || {
-            let mut ctx_params = WhisperContextParameters::default();
-            ctx_params.use_gpu = use_gpu;
-
-            log_cb("[推理] 加载模型...");
-            let ctx = match WhisperContext::new_with_params(&model_path_str, ctx_params) {
-                Ok(c) => c,
-                Err(e) => {
-                    let _ = tx.send(Err(AppError::Transcription(format!("加载模型失败: {e}"))));
-                    return;
+            let result = match backend {
+                TranscriptionBackend::Whisper => {
+                    super::whisper_backend::transcribe_on_thread(
+                        model_path_str,
+                        samples,
+                        &request_clone,
+                        time_offset,
+                        duration,
+                        progress_cb.clone(),
+                        log_cb.clone(),
+                        flag,
+                    )
+                }
+                TranscriptionBackend::SherpaOnnx => {
+                    super::sherpa_backend::transcribe_on_thread(
+                        model_path_str,
+                        samples,
+                        &request_clone,
+                        time_offset,
+                        duration,
+                        progress_cb.clone(),
+                        log_cb.clone(),
+                        flag,
+                        punct_model_path.clone(),
+                    )
                 }
             };
-            log_cb("[推理] 模型加载完成");
 
-            let mut state = match ctx.create_state() {
-                Ok(s) => s,
-                Err(e) => {
-                    let _ = tx.send(Err(AppError::Transcription(format!("创建推理状态失败: {e}"))));
-                    return;
-                }
-            };
+            match result {
+                Ok((mut segments, params_json)) => {
+                    // ── 后处理（所有后端共享） ──
 
-            // ── VAD 预分割 + 长段二次分割 ──
-            let voice_chunks: Vec<(f64, f64)> = if enable_vad {
-                let vad_segments = vad::detect_voice_segments(&samples, 16_000, &vad_config);
-                let split_segments = vad::split_long_segments(&vad_segments, &samples, 16_000, 30.0);
-                let voice: Vec<(f64, f64)> = split_segments
-                    .iter()
-                    .filter(|s| s.is_voice)
-                    .map(|s| (s.start_seconds, s.end_seconds))
-                    .collect();
+                    segments.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
 
-                let total_voice: f64 = voice.iter().map(|(s, e)| e - s).sum();
-                let total_dur = samples.len() as f64 / 16_000.0;
-                log_cb(&format!(
-                    "[VAD] 分割完成：{} 个有声段，有声 {total_voice:.1}s / 总 {total_dur:.1}s（跳过 {:.0}% 静音）",
-                    voice.len(),
-                    (1.0 - total_voice / total_dur.max(0.001)) * 100.0
-                ));
+                    let pre_dedup_count = segments.len();
+                    segments = dedup_overlap_segments(segments);
+                    if segments.len() < pre_dedup_count {
+                        log_cb(&format!(
+                            "[后处理] 重叠去重：{pre_dedup_count} → {} 段",
+                            segments.len()
+                        ));
+                    }
 
-                if voice.is_empty() {
-                    log_cb("[VAD] 未检测到有声段，跳过推理");
-                    progress_cb(1.0, "未检测到有声内容");
+                    let pre_merge_count = segments.len();
+                    segments = merge_short_segments(segments, 0.3, 12.0);
+                    if segments.len() < pre_merge_count {
+                        log_cb(&format!(
+                            "[后处理] 短段合并：{pre_merge_count} → {} 段",
+                            segments.len()
+                        ));
+                    }
+
+                    let pre_filter_count = segments.len();
+
+                    if max_repeat_filter > 0 {
+                        let mut filtered = Vec::with_capacity(segments.len());
+                        let mut repeat_count = 0u32;
+                        for seg in segments {
+                            if let Some(prev) = filtered.last() {
+                                let prev: &TranscriptionSegment = prev;
+                                if seg.text == prev.text {
+                                    repeat_count += 1;
+                                    if repeat_count >= max_repeat_filter {
+                                        continue;
+                                    }
+                                } else {
+                                    repeat_count = 0;
+                                }
+                            }
+                            filtered.push(seg);
+                        }
+                        segments = filtered;
+                    }
+
+                    let hallucination_phrases = [
+                        "谢谢观看", "感谢收看", "字幕由", "字幕提供",
+                        "Thanks for watching", "Subscribe",
+                        "请不吝点赞", "欢迎订阅", "下期再见",
+                        "Subtitles by", "Copyright",
+                    ];
+                    segments.retain(|seg| {
+                        let t = seg.text.trim();
+                        !hallucination_phrases.iter().any(|&phrase| t.contains(phrase))
+                    });
+
+                    segments.retain(|seg| {
+                        let seg_dur = seg.end - seg.start;
+                        let char_count = seg.text.chars().count();
+                        !(seg_dur > 25.0 && char_count < 3)
+                    });
+
+                    for seg in &mut segments {
+                        if seg.end < seg.start {
+                            seg.end = seg.start + 0.5;
+                        }
+                    }
+
+                    let removed = pre_filter_count - segments.len();
+                    if removed > 0 {
+                        log_cb(&format!(
+                            "[后处理] 过滤了 {removed} 个幻觉/异常分段（{pre_filter_count} → {}）",
+                            segments.len()
+                        ));
+                    }
+
+                    progress_cb(1.0, "转录完成");
+
+                    let text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n");
                     let _ = tx.send(Ok(TranscriptionResult {
                         id: uuid::Uuid::new_v4().to_string(),
                         audio_file_id,
                         model_name,
-                        text: String::new(),
-                        segments: vec![],
+                        text,
+                        segments,
                         language: req_language.unwrap_or_else(|| "auto".to_string()),
                         duration,
-                        created_at: Utc::now().to_rfc3339(),
-                        params_json: None,
+                        created_at: chrono::Utc::now().to_rfc3339(),
+                        params_json: Some(params_json),
                     }));
-                    return;
                 }
-                voice
-            } else {
-                vec![(0.0, samples.len() as f64 / 16_000.0)]
-            };
-
-            // ── 重叠扩展：防止 VAD 切割边界截断语音 ──
-            let total_duration = samples.len() as f64 / 16_000.0;
-            let voice_chunks = if enable_vad && voice_chunks.len() > 1 {
-                let expanded = vad::add_overlap(&voice_chunks, 0.5, total_duration);
-                log_cb(&format!("[VAD] 已为 {} 个段添加 0.5s 重叠缓冲", expanded.len()));
-                expanded
-            } else {
-                voice_chunks
-            };
-
-            // 计算各段权重用于进度映射
-            let total_voice_samples: usize = voice_chunks.iter()
-                .map(|(s, e)| ((e - s) * 16_000.0) as usize)
-                .sum();
-            let mut cumulative_samples = 0usize;
-
-            let mut all_segments: Vec<TranscriptionSegment> = Vec::new();
-            let mut prev_tail_text: Option<String> = None;
-
-            for (chunk_idx, &(chunk_start, chunk_end)) in voice_chunks.iter().enumerate() {
-                if abort_flag.load(Ordering::Relaxed) {
-                    log_cb("[推理] 用户中止了转录");
-                    let _ = tx.send(Err(AppError::Transcription("用户中止了转录".to_string())));
-                    return;
-                }
-
-                let start_sample = (chunk_start * 16_000.0) as usize;
-                let end_sample = ((chunk_end * 16_000.0) as usize).min(samples.len());
-                let chunk_samples = &samples[start_sample..end_sample];
-                let chunk_sample_count = chunk_samples.len();
-
-                log_cb(&format!(
-                    "[推理] 段 {}/{}: {chunk_start:.2}s ~ {chunk_end:.2}s ({:.1}s)",
-                    chunk_idx + 1, voice_chunks.len(), chunk_end - chunk_start
-                ));
-
-                // 进度映射：当前段的 whisper 0~100% → 全局 [段起始比例, 段结束比例]
-                let progress_base = 0.05 + (cumulative_samples as f32 / total_voice_samples.max(1) as f32) * 0.90;
-                let progress_span = (chunk_sample_count as f32 / total_voice_samples.max(1) as f32) * 0.90;
-                let pcb = progress_cb.clone();
-                let lcb = log_cb.clone();
-                let chunk_idx_display = chunk_idx + 1;
-                let total_chunks = voice_chunks.len();
-
-                let mut params = FullParams::new(SamplingStrategy::Greedy { best_of });
-                params.set_n_threads(n_threads);
-                if let Some(lang) = language.as_deref() {
-                    if lang != "auto" {
-                        params.set_language(Some(lang));
-                    }
-                }
-                params.set_print_progress(false);
-                params.set_print_realtime(false);
-                params.set_print_special(false);
-                params.set_print_timestamps(false);
-                params.set_suppress_blank(suppress_blank);
-                params.set_suppress_nst(suppress_nst);
-                params.set_no_context(no_context);
-                params.set_entropy_thold(entropy_thold);
-                params.set_logprob_thold(logprob_thold);
-                params.set_no_speech_thold(no_speech_thold);
-                params.set_temperature(temperature);
-                params.set_temperature_inc(temperature_inc);
-                params.set_max_initial_ts(max_initial_ts);
-
-                // Initial Prompt：用户提供的 prompt 优先，否则用前段末尾文本作为上下文
-                let effective_prompt: Option<String> = if chunk_idx == 0 {
-                    initial_prompt.clone()
-                } else {
-                    prev_tail_text.clone().or_else(|| initial_prompt.clone())
-                };
-                if let Some(ref prompt) = effective_prompt {
-                    params.set_initial_prompt(prompt);
-                }
-
-                params.set_progress_callback_safe(move |pct: i32| {
-                    let mapped = progress_base + (pct as f32 / 100.0) * progress_span;
-                    pcb(mapped, &format!("段 {chunk_idx_display}/{total_chunks} 推理中 {pct}%"));
-                    lcb(&format!("[推理] 段 {chunk_idx_display}/{total_chunks} 进度 {pct}%"));
-                });
-
-                unsafe extern "C" fn abort_trampoline(
-                    user_data: *mut std::ffi::c_void,
-                ) -> bool {
-                    let flag = &*(user_data as *const AtomicBool);
-                    flag.load(Ordering::Relaxed)
-                }
-                unsafe {
-                    params.set_abort_callback(Some(abort_trampoline));
-                    params.set_abort_callback_user_data(
-                        Arc::as_ptr(&abort_flag) as *mut std::ffi::c_void,
-                    );
-                }
-
-                let full_result = state.full(params, chunk_samples);
-                let aborted = abort_flag.load(Ordering::Relaxed);
-
-                if let Err(e) = full_result {
-                    if aborted {
-                        log_cb("[推理] 用户中止了转录");
-                        let _ = tx.send(Err(AppError::Transcription("用户中止了转录".to_string())));
-                    } else {
-                        let _ = tx.send(Err(AppError::Transcription(format!("Whisper 推理失败: {e}"))));
-                    }
-                    return;
-                }
-
-                // 提取分段并映射到原始时间线
-                let n_segs = state.full_n_segments();
-                let mut chunk_last_text: Option<String> = None;
-
-                for i in 0..n_segs {
-                    let Some(seg) = state.get_segment(i) else {
-                        let _ = tx.send(Err(AppError::Transcription(format!("读取分段 {i} 失败"))));
-                        return;
-                    };
-                    let text = match seg.to_str_lossy() {
-                        Ok(t) => t.trim().to_string(),
-                        Err(e) => {
-                            let _ = tx.send(Err(AppError::Transcription(format!("读取分段文本失败: {e}"))));
-                            return;
-                        }
-                    };
-                    if text.is_empty() {
-                        continue;
-                    }
-                    chunk_last_text = Some(text.clone());
-                    all_segments.push(TranscriptionSegment {
-                        start: seg.start_timestamp() as f64 / 100.0 + chunk_start + time_offset,
-                        end: seg.end_timestamp() as f64 / 100.0 + chunk_start + time_offset,
-                        text,
-                    });
-                }
-
-                // 记录本段末尾文本，供下段作为 initial prompt 上下文
-                if let Some(tail) = chunk_last_text {
-                    let tail_chars: String = tail.chars().rev().take(200).collect::<Vec<_>>().into_iter().rev().collect();
-                    prev_tail_text = Some(tail_chars);
-                }
-
-                cumulative_samples += chunk_sample_count;
-            }
-
-            log_cb(&format!("[推理] 全部 {} 段推理完成，共 {} 个分段", voice_chunks.len(), all_segments.len()));
-
-            // ── 后处理 0: 重叠区域去重 ──
-            all_segments.sort_by(|a, b| a.start.partial_cmp(&b.start).unwrap_or(std::cmp::Ordering::Equal));
-            let pre_dedup_count = all_segments.len();
-            let all_segments = dedup_overlap_segments(all_segments);
-            if all_segments.len() < pre_dedup_count {
-                log_cb(&format!(
-                    "[后处理] 重叠去重：{pre_dedup_count} → {} 段",
-                    all_segments.len()
-                ));
-            }
-
-            // ── 后处理 0.5: 短分段合并 ──
-            let pre_merge_count = all_segments.len();
-            let all_segments = merge_short_segments(all_segments, 0.3, 12.0);
-            if all_segments.len() < pre_merge_count {
-                log_cb(&format!(
-                    "[后处理] 短段合并：{pre_merge_count} → {} 段",
-                    all_segments.len()
-                ));
-            }
-
-            // ── 后处理：幻觉检测与过滤 ──
-            let mut segments = all_segments;
-            let pre_filter_count = segments.len();
-
-            // 1. 连续重复分段过滤（保留原有逻辑）
-            if max_repeat_filter > 0 {
-                let mut filtered = Vec::with_capacity(segments.len());
-                let mut repeat_count = 0u32;
-                for seg in segments {
-                    if let Some(prev) = filtered.last() {
-                        let prev: &TranscriptionSegment = prev;
-                        if seg.text == prev.text {
-                            repeat_count += 1;
-                            if repeat_count >= max_repeat_filter {
-                                continue;
-                            }
-                        } else {
-                            repeat_count = 0;
-                        }
-                    }
-                    filtered.push(seg);
-                }
-                segments = filtered;
-            }
-
-            // 2. 典型幻觉短语检测
-            let hallucination_phrases = [
-                "谢谢观看", "感谢收看", "字幕由", "字幕提供",
-                "Thanks for watching", "Subscribe",
-                "请不吝点赞", "欢迎订阅", "下期再见",
-                "Subtitles by", "Copyright",
-            ];
-            segments.retain(|seg| {
-                let t = seg.text.trim();
-                !hallucination_phrases.iter().any(|&phrase| t.contains(phrase))
-            });
-
-            // 3. 异常时长/字数检测：单段覆盖 >25s 且字数 <3 → 可能是幻觉
-            segments.retain(|seg| {
-                let seg_dur = seg.end - seg.start;
-                let char_count = seg.text.chars().count();
-                !(seg_dur > 25.0 && char_count < 3)
-            });
-
-            // 4. 时间戳合理性：修正 end < start 的异常段
-            for seg in &mut segments {
-                if seg.end < seg.start {
-                    seg.end = seg.start + 0.5;
+                Err(e) => {
+                    let _ = tx.send(Err(e));
                 }
             }
-
-            let removed = pre_filter_count - segments.len();
-            if removed > 0 {
-                log_cb(&format!(
-                    "[后处理] 过滤了 {removed} 个幻觉/异常分段（{pre_filter_count} → {}）",
-                    segments.len()
-                ));
-            }
-
-            progress_cb(1.0, "转录完成");
-
-            let text = segments.iter().map(|s| s.text.as_str()).collect::<Vec<_>>().join("\n");
-            let params_json = serde_json::to_string(&serde_json::json!({
-                "bestOf": best_of,
-                "suppressBlank": suppress_blank,
-                "suppressNst": suppress_nst,
-                "noContext": no_context,
-                "entropyThold": entropy_thold,
-                "logprobThold": logprob_thold,
-                "noSpeechThold": no_speech_thold,
-                "temperature": temperature,
-                "temperatureInc": temperature_inc,
-                "maxInitialTs": max_initial_ts,
-                "maxRepeatFilter": max_repeat_filter,
-                "enableVad": enable_vad,
-                "initialPrompt": initial_prompt,
-            })).ok();
-            let _ = tx.send(Ok(TranscriptionResult {
-                id: uuid::Uuid::new_v4().to_string(),
-                audio_file_id,
-                model_name,
-                text,
-                segments,
-                language: req_language.unwrap_or_else(|| "auto".to_string()),
-                duration,
-                created_at: Utc::now().to_rfc3339(),
-                params_json,
-            }));
         });
 
         rx.await.map_err(|_| AppError::Transcription("推理线程异常退出".to_string()))?
-        }
     }
 }
 
-/// 重叠区域去重：当两个分段在时间上重叠时，保留文本更长的那个，
-/// 裁剪较短段的时间范围以消除重叠。
+// ── 后处理函数 ──
+
 fn dedup_overlap_segments(mut segments: Vec<TranscriptionSegment>) -> Vec<TranscriptionSegment> {
     if segments.len() < 2 {
         return segments;
@@ -624,26 +755,21 @@ fn dedup_overlap_segments(mut segments: Vec<TranscriptionSegment>) -> Vec<Transc
     for seg in segments {
         let prev = result.last_mut().unwrap();
         if seg.start < prev.end {
-            // 存在时间重叠
             let prev_len = prev.text.chars().count();
             let seg_len = seg.text.chars().count();
             if seg_len > prev_len {
-                // 当前段文本更完整，裁剪前段的 end
                 prev.end = seg.start;
                 if prev.end <= prev.start + 0.05 {
-                    // 前段被完全覆盖，替换之
                     *prev = seg;
                 } else {
                     result.push(seg);
                 }
             } else {
-                // 前段文本更完整，裁剪当前段的 start
                 let mut adjusted = seg;
                 adjusted.start = prev.end;
                 if adjusted.start < adjusted.end - 0.05 {
                     result.push(adjusted);
                 }
-                // 否则当前段被完全覆盖，丢弃
             }
         } else {
             result.push(seg);
@@ -653,8 +779,6 @@ fn dedup_overlap_segments(mut segments: Vec<TranscriptionSegment>) -> Vec<Transc
     result
 }
 
-/// 短分段合并：将间隔小于 min_gap 且前段未以句末标点结尾的相邻段合并，
-/// 合并后单段不超过 max_duration 秒。
 fn merge_short_segments(
     segments: Vec<TranscriptionSegment>,
     min_gap: f64,
@@ -690,4 +814,14 @@ fn ends_with_sentence_punct(text: &str) -> bool {
     }
     let last = t.chars().last().unwrap();
     matches!(last, '。' | '！' | '？' | '；' | '.' | '!' | '?' | ';')
+}
+
+/// 递归计算目录总大小
+fn dir_total_size(dir: &Path) -> u64 {
+    walkdir::WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(|e| e.metadata().map(|m| m.len()).unwrap_or(0))
+        .sum()
 }

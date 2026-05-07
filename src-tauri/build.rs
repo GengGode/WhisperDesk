@@ -5,7 +5,16 @@ fn main() {
     {
         compile_delay_hook();
         setup_cuda_delay_load();
+        fix_crt_conflict();
     }
+}
+
+/// sherpa-onnx 使用 features=["shared"]（动态链接），其 /MT 编译的代码封装在 DLL 内部，
+/// 不会与主 exe 的 /MD CRT 冲突，因此无需 /NODEFAULTLIB:LIBCMT。
+/// 保留此函数以备将来需要处理静态链接场景。
+#[cfg(target_os = "windows")]
+fn fix_crt_conflict() {
+    // sherpa-onnx shared 模式下无 CRT 冲突，不需要干预链接器
 }
 
 /// 编译 C 延迟加载失败钩子（覆盖 delayimp.lib 中默认的 NULL）
@@ -57,7 +66,7 @@ fn setup_cuda_delay_load() {
             }
             for prefix in &prefixes {
                 if name.starts_with(prefix) && !delay_loaded.contains(&name) {
-                    println!("cargo:rustc-link-arg=/DELAYLOAD:{name}");
+                    println!("cargo:rustc-link-arg-bins=/DELAYLOAD:{name}");
                     delay_loaded.push(name.clone());
                     break;
                 }
@@ -66,7 +75,7 @@ fn setup_cuda_delay_load() {
     }
 
     // nvcuda.dll 由 NVIDIA 驱动提供，文件名固定
-    println!("cargo:rustc-link-arg=/DELAYLOAD:nvcuda.dll");
+    println!("cargo:rustc-link-arg-bins=/DELAYLOAD:nvcuda.dll");
     delay_loaded.push("nvcuda.dll".to_string());
 
     // 链接 MSVC 延迟加载辅助库

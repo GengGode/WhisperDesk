@@ -1,5 +1,30 @@
 use serde::{Deserialize, Serialize};
 
+// ── 转录后端 ──
+
+/// 转录引擎后端标识
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TranscriptionBackend {
+    Whisper,
+    SherpaOnnx,
+}
+
+impl Default for TranscriptionBackend {
+    fn default() -> Self {
+        Self::SherpaOnnx
+    }
+}
+
+/// sherpa-onnx 支持的模型架构
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum SherpaModelType {
+    Paraformer,
+    SenseVoice,
+    FireRedAsr,
+}
+
 // ── VAD（语音活动检测）相关结构 ──
 
 /// VAD 算法参数
@@ -117,6 +142,8 @@ pub struct TranscriptionRequest {
     pub use_gpu: Option<bool>,
     /// 远程推理服务器地址，非空时走远程推理
     pub remote_url: Option<String>,
+    /// 转录后端，为 None 时根据 model_name 自动推断
+    pub backend: Option<TranscriptionBackend>,
 
     // ── Whisper 推理参数（均为 Option，None 时使用默认值） ──
 
@@ -161,6 +188,14 @@ pub struct TranscriptionRequest {
 
     /// 初始提示词，注入 decoder 引导输出风格和术语
     pub initial_prompt: Option<String>,
+
+    // ── 标点恢复 ──
+
+    /// 是否启用标点恢复后处理（对无标点的 ASR 输出自动补充标点），默认 true
+    pub enable_punctuation: Option<bool>,
+
+    /// 模型下载代理地址（http/https/socks5），为 None 时直连
+    pub download_proxy: Option<String>,
 }
 
 /// 更新转录结果请求（通过 result id 定位）

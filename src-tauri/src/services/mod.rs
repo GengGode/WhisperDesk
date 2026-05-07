@@ -2,5 +2,7 @@ pub mod audio;
 pub mod cuda;
 pub mod file_index;
 pub mod paths;
+pub mod sherpa_backend;
 pub mod transcriber;
 pub mod vad;
+pub mod whisper_backend;

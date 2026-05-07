@@ -183,6 +183,9 @@ async fn transcribe(
         enable_vad: Some(cfg.enable_vad),
         vad_config: None,
         initial_prompt: if cfg.initial_prompt.is_empty() { None } else { Some(cfg.initial_prompt) },
+        enable_punctuation: Some(true),
+        backend: None,
+        download_proxy: None,
     };
 
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);

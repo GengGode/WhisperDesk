@@ -62,8 +62,8 @@ export async function transcribeAudio(
   return invoke<TranscriptionResult>("transcribe_audio", { request });
 }
 
-export async function ensureModel(modelName: string): Promise<string> {
-  return invoke<string>("ensure_model", { modelName });
+export async function ensureModel(modelName: string, proxy?: string): Promise<string> {
+  return invoke<string>("ensure_model", { modelName, proxy: proxy || null });
 }
 
 export async function abortTranscription(): Promise<void> {

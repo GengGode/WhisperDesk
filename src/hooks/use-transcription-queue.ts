@@ -50,6 +50,7 @@ export function useTranscriptionQueue() {
       threads: settings.threads,
       useGpu: settings.useGpu,
       remoteUrl: settings.remoteUrl || undefined,
+      backend: settings.backend,
       bestOf: settings.bestOf,
       suppressBlank: settings.suppressBlank,
       suppressNst: settings.suppressNst,
@@ -64,6 +65,8 @@ export function useTranscriptionQueue() {
       enableVad: settings.enableVad,
       vadConfig: settings.vadConfig,
       initialPrompt: settings.initialPrompt || undefined,
+      enablePunctuation: settings.enablePunctuation,
+      downloadProxy: settings.downloadProxy || undefined,
     })
       .then((result) => {
         addResult(fileId, result);
