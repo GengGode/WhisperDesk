@@ -25,6 +25,8 @@ pub fn run() {
             commands::files::toggle_star,
             commands::files::set_file_tags,
             commands::files::list_all_tags,
+            commands::files::relocate_folder,
+            commands::files::relocate_file,
             commands::whisper::transcribe_audio,
             commands::whisper::get_transcription_results,
             commands::whisper::ensure_model,

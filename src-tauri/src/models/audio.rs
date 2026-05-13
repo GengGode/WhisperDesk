@@ -207,6 +207,35 @@ pub struct UpdateTranscriptionRequest {
     pub segments: Vec<TranscriptionSegment>,
 }
 
+// ── 路径配准（重新定位） ──
+
+/// 缺失文件信息（磁盘上已不存在的数据库记录）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissingFileInfo {
+    pub id: String,
+    pub name: String,
+    pub path: String,
+}
+
+/// 单条配准匹配结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateMatch {
+    pub id: String,
+    pub name: String,
+    pub old_path: String,
+    pub new_path: String,
+}
+
+/// 路径配准整体结果
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelocateResult {
+    pub matched: Vec<RelocateMatch>,
+    pub unmatched: Vec<MissingFileInfo>,
+}
+
 /// 导出格式
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

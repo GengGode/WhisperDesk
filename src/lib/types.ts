@@ -158,6 +158,29 @@ export interface UpdateTranscriptionRequest {
   segments: TranscriptionSegment[];
 }
 
+// ── 路径配准（重新定位） ──
+
+/** 缺失文件信息 */
+export interface MissingFileInfo {
+  id: string;
+  name: string;
+  path: string;
+}
+
+/** 单条配准匹配结果 */
+export interface RelocateMatch {
+  id: string;
+  name: string;
+  oldPath: string;
+  newPath: string;
+}
+
+/** 路径配准整体结果 */
+export interface RelocateResult {
+  matched: RelocateMatch[];
+  unmatched: MissingFileInfo[];
+}
+
 /** 波形峰值数据 */
 export interface WaveformData {
   peaks: number[];

@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_dialog::DialogExt;
 use walkdir::WalkDir;
 
-use crate::models::audio::AudioFileMeta;
+use crate::models::audio::{AudioFileMeta, RelocateResult};
 use crate::models::error::AppError;
 use crate::services::file_index::FileIndexService;
 
@@ -171,6 +171,54 @@ pub fn list_all_tags() -> Result<Vec<String>, AppError> {
     let service = FileIndexService::portable()?;
     service.init()?;
     service.list_all_tags()
+}
+
+#[tauri::command]
+pub fn relocate_folder(app: AppHandle, old_folder: String) -> Result<Option<RelocateResult>, AppError> {
+    println!("[路径配准] 旧路径: {old_folder}");
+
+    let picked = app.dialog().file().blocking_pick_folder();
+    let Some(new_folder) = dialog_path_to_pathbuf(picked) else {
+        println!("[路径配准] 用户取消选择");
+        return Ok(None);
+    };
+
+    println!("[路径配准] 新路径: {}", new_folder.display());
+    let service = FileIndexService::portable()?;
+    service.init()?;
+    let result = service.relocate_folder(&old_folder, &new_folder)?;
+    println!(
+        "[路径配准] 匹配 {} 个, 未匹配 {} 个",
+        result.matched.len(),
+        result.unmatched.len()
+    );
+    Ok(Some(result))
+}
+
+#[tauri::command]
+pub fn relocate_file(app: AppHandle, id: String) -> Result<Option<AudioFileMeta>, AppError> {
+    println!("[路径配准] 单文件重定位: id={id}");
+
+    let picked = app
+        .dialog()
+        .file()
+        .add_filter("音频文件", &["wav", "mp3", "flac", "ogg", "m4a", "aac"])
+        .blocking_pick_file();
+
+    let Some(new_path) = dialog_path_to_pathbuf(picked) else {
+        println!("[路径配准] 用户取消选择");
+        return Ok(None);
+    };
+
+    println!("[路径配准] 新文件: {}", new_path.display());
+    let service = FileIndexService::portable()?;
+    service.init()?;
+    service.relocate_file(&id, &new_path)?;
+
+    // 返回更新后的完整文件列表中该记录
+    let all = service.list_audio()?;
+    let updated = all.into_iter().find(|f| f.id == id);
+    Ok(updated)
 }
 
 fn is_audio_file(path: &Path) -> bool {

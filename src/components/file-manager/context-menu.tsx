@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { deleteAudioFile, toggleStar } from "@/lib/tauri";
+import { deleteAudioFile, toggleStar, relocateFolder, relocateFile } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
-import type { AudioFile } from "@/lib/types";
+import type { AudioFile, RelocateResult } from "@/lib/types";
 import type { FolderNode } from "@/lib/file-tree";
 
 export interface ContextMenuState {
@@ -85,6 +85,20 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
       },
     },
     {
+      label: "重新定位文件",
+      action: async () => {
+        onClose();
+        try {
+          const updated = await relocateFile(state.file.id);
+          if (updated) {
+            updateFile(state.file.id, { path: updated.path, name: updated.name });
+          }
+        } catch (err) {
+          console.error("[路径配准] 单文件重定位失败", err);
+        }
+      },
+    },
+    {
       label: "在资源管理器中显示",
       action: async () => {
         onClose();
@@ -154,6 +168,7 @@ export interface FolderContextMenuState {
 interface FolderContextMenuProps {
   state: FolderContextMenuState;
   onClose: () => void;
+  onRelocateResult: (result: RelocateResult) => void;
 }
 
 /** 递归收集文件夹下所有音频文件 */
@@ -165,7 +180,7 @@ function collectAllFiles(node: FolderNode): AudioFile[] {
   return result;
 }
 
-export function FolderContextMenu({ state, onClose }: FolderContextMenuProps) {
+export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const enqueueFiles = useTranscriptionStore((s) => s.enqueueFiles);
   const queueRunning = useTranscriptionStore((s) => s.queueRunning);
@@ -222,6 +237,20 @@ export function FolderContextMenu({ state, onClose }: FolderContextMenuProps) {
         onClose();
         for (const f of allFiles) {
           if (!selectedFileIds.has(f.id)) toggleSelect(f.id);
+        }
+      },
+    },
+    {
+      label: "重新定位文件夹",
+      action: async () => {
+        onClose();
+        try {
+          const result = await relocateFolder(state.folder.fullPath);
+          if (result) {
+            onRelocateResult(result);
+          }
+        } catch (err) {
+          console.error("[路径配准] 配准失败", err);
         }
       },
     },

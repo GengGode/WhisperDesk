@@ -6,6 +6,7 @@ import type {
   DashboardSnapshot,
   ExportFormat,
   ExportRequest,
+  RelocateResult,
   ServerConfig,
   ServerStatus,
   TranscriptionProgress,
@@ -54,6 +55,18 @@ export async function setFileTags(id: string, tags: string[]): Promise<void> {
 
 export async function listAllTags(): Promise<string[]> {
   return invoke<string[]>("list_all_tags");
+}
+
+export async function relocateFolder(
+  oldFolder: string,
+): Promise<RelocateResult | null> {
+  return invoke<RelocateResult | null>("relocate_folder", { oldFolder });
+}
+
+export async function relocateFile(
+  id: string,
+): Promise<AudioFile | null> {
+  return invoke<AudioFile | null>("relocate_file", { id });
 }
 
 export async function transcribeAudio(

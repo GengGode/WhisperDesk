@@ -5,7 +5,14 @@ use chrono::Utc;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
-use crate::models::audio::{AudioFileMeta, TranscriptionResult, TranscriptionSegment, TranscriptionStatus};
+use std::collections::HashMap;
+
+use walkdir::WalkDir;
+
+use crate::models::audio::{
+    AudioFileMeta, MissingFileInfo, RelocateMatch, RelocateResult,
+    TranscriptionResult, TranscriptionSegment, TranscriptionStatus,
+};
 use crate::models::error::AppError;
 use crate::services::audio::probe_audio_metadata;
 use crate::services::paths;
@@ -373,6 +380,125 @@ impl FileIndexService {
             out.push(TranscriptionResult { id, audio_file_id, model_name, text, segments, language, duration, created_at, params_json });
         }
         Ok(out)
+    }
+
+    /// 路径配准：将旧文件夹下缺失的文件匹配到新文件夹中
+    ///
+    /// 按文件名 + 文件大小进行匹配，匹配成功的记录直接更新数据库路径。
+    pub fn relocate_folder(&self, old_folder: &str, new_folder: &Path) -> Result<RelocateResult, AppError> {
+        if !new_folder.exists() || !new_folder.is_dir() {
+            return Err(AppError::FileSystem("所选路径不是有效的文件夹".to_string()));
+        }
+
+        let conn = Connection::open(&self.db_path)?;
+
+        // 统一路径分隔符为正斜杠，方便 LIKE 匹配
+        let old_normalized = old_folder.replace('\\', "/");
+        let like_pattern = format!("{}%", old_normalized);
+
+        // 查询该文件夹前缀下的所有记录
+        let mut stmt = conn.prepare(
+            "SELECT id, name, path, size FROM audio_files WHERE REPLACE(path, '\\', '/') LIKE ?",
+        )?;
+        let rows = stmt.query_map(params![like_pattern], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, u64>(3)?,
+            ))
+        })?;
+
+        // 筛选出磁盘上已不存在的缺失文件
+        let mut missing: Vec<(String, String, String, u64)> = Vec::new();
+        for row in rows {
+            let (id, name, path, size) = row?;
+            if !Path::new(&path).exists() {
+                missing.push((id, name, path, size));
+            }
+        }
+
+        if missing.is_empty() {
+            return Ok(RelocateResult {
+                matched: vec![],
+                unmatched: vec![],
+            });
+        }
+
+        // 扫描新文件夹，构建 (文件名, 文件大小) -> 路径 的索引
+        let mut new_files: HashMap<(String, u64), String> = HashMap::new();
+        for entry in WalkDir::new(new_folder)
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_file())
+        {
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let file_size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let key = (file_name, file_size);
+            new_files.entry(key).or_insert_with(|| {
+                entry.path().to_string_lossy().to_string()
+            });
+        }
+
+        let mut matched = Vec::new();
+        let mut unmatched = Vec::new();
+
+        for (id, name, old_path, size) in missing {
+            let key = (name.clone(), size);
+            if let Some(new_path) = new_files.get(&key) {
+                // 更新数据库路径
+                conn.execute(
+                    "UPDATE audio_files SET path = ? WHERE id = ?",
+                    params![new_path, id],
+                )?;
+                matched.push(RelocateMatch {
+                    id,
+                    name,
+                    old_path,
+                    new_path: new_path.clone(),
+                });
+            } else {
+                unmatched.push(MissingFileInfo {
+                    id,
+                    name,
+                    path: old_path,
+                });
+            }
+        }
+
+        println!(
+            "[路径配准] 完成: 匹配 {} 个, 未匹配 {} 个",
+            matched.len(),
+            unmatched.len()
+        );
+
+        Ok(RelocateResult { matched, unmatched })
+    }
+
+    /// 单文件路径重定位：将指定记录的路径更新为新文件路径
+    pub fn relocate_file(&self, id: &str, new_path: &Path) -> Result<(), AppError> {
+        if !new_path.exists() || !new_path.is_file() {
+            return Err(AppError::FileSystem("所选路径不是有效的文件".to_string()));
+        }
+
+        let conn = Connection::open(&self.db_path)?;
+        let new_path_str = new_path.to_string_lossy().to_string();
+
+        let affected = conn.execute(
+            "UPDATE audio_files SET path = ?, name = ? WHERE id = ?",
+            params![
+                new_path_str,
+                new_path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown"),
+                id,
+            ],
+        )?;
+
+        if affected == 0 {
+            return Err(AppError::InvalidArgument("未找到对应的音频文件记录".to_string()));
+        }
+
+        println!("[路径配准] 单文件重定位成功: id={id}, 新路径={new_path_str}");
+        Ok(())
     }
 
     /// 通过 result id 获取单条转录结果（导出用）
