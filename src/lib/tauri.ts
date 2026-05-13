@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type {
   AudioFile,
@@ -439,7 +439,7 @@ export async function setServerConfig(config: ServerConfig): Promise<void> {
  */
 export function getAudioUrl(fileId: string, filePath: string): string {
   if (IS_TAURI) {
-    return `asset://localhost/${encodeURIComponent(filePath)}`;
+    return convertFileSrc(filePath);
   }
   return `${API_BASE}/api/audio/${fileId}`;
 }
