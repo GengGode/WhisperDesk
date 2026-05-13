@@ -1,4 +1,15 @@
 fn main() {
+    // rust-embed 需要目标文件夹存在（即使为空）。
+    // 首次编译还未 pnpm build 时，创建空 dist/ 避免编译失败。
+    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let dist = std::path::PathBuf::from(&manifest_dir)
+        .parent()
+        .expect("无法获取项目根目录")
+        .join("dist");
+    if !dist.exists() {
+        std::fs::create_dir_all(&dist).ok();
+    }
+
     tauri_build::build();
 
     #[cfg(target_os = "windows")]

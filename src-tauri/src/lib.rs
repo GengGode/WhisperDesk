@@ -120,8 +120,8 @@ pub fn run_headless(api_port: u16, web_port: Option<u16>) {
         let state = server::InferenceServerState::new();
         state.start_api(api_port).await.expect("启动 API 服务失败");
 
-        if let (Some(wp), Some(dir)) = (web_port, find_web_dir()) {
-            state.start_web(wp, dir, api_port).await.expect("启动 Web 服务失败");
+        if let Some(wp) = web_port {
+            state.start_web(wp, api_port).await.expect("启动 Web 服务失败");
         }
 
         println!("[无头模式] 服务已就绪，按 Ctrl+C 退出");
@@ -130,51 +130,4 @@ pub fn run_headless(api_port: u16, web_port: Option<u16>) {
         println!("[无头模式] 正在关闭...");
         state.stop().await.ok();
     });
-}
-
-/// 查找 SPA 前端静态文件目录
-///
-/// 搜索顺序：
-/// 1. exe 同级 `data/web/`（打包发布时的标准位置）
-/// 2. CWD 下的 `dist/`
-/// 3. 编译时 CARGO_MANIFEST_DIR (`src-tauri/`) 的父目录下 `dist/`
-///    （本地构建 release 后直接运行 exe 时命中此路径）
-fn find_web_dir() -> Option<std::path::PathBuf> {
-    let candidates: Vec<std::path::PathBuf> = {
-        let mut v = Vec::new();
-
-        // 1. exe 同级 data/web/
-        if let Ok(exe) = std::env::current_exe() {
-            if let Some(parent) = exe.parent() {
-                v.push(parent.join("data").join("web"));
-            }
-        }
-
-        // 2. CWD/dist/
-        v.push(std::path::PathBuf::from("dist"));
-
-        // 3. 基于编译时 CARGO_MANIFEST_DIR 推算项目根 dist/
-        {
-            let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            if let Some(project_root) = manifest.parent() {
-                v.push(project_root.join("dist"));
-            }
-        }
-
-        v
-    };
-
-    for dir in &candidates {
-        if dir.join("index.html").exists() {
-            let canonical = dir.canonicalize().unwrap_or_else(|_| dir.clone());
-            println!("[Web] 使用 SPA 目录: {}", canonical.display());
-            return Some(canonical);
-        }
-    }
-
-    println!("[Web] 未找到 SPA 目录，已检查以下路径:");
-    for dir in &candidates {
-        println!("  - {}", dir.display());
-    }
-    None
 }

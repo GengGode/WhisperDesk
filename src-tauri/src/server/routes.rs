@@ -1,6 +1,5 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
@@ -12,15 +11,29 @@ use axum::{
     routing::{get, post, put},
     Json, Router,
 };
+use rust_embed::Embed;
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
 
 use crate::models::audio::{AudioFileMeta, TranscriptionRequest, TranscriptionResult};
 use crate::services::file_index::FileIndexService;
 use crate::services::transcriber::TranscriberService;
 
 use super::dashboard::DashboardState;
+
+/// 编译时嵌入前端 SPA 构建产物（`pnpm build` 输出的 `dist/`）
+#[derive(Embed)]
+#[folder = "../dist/"]
+#[include = "*.html"]
+#[include = "*.js"]
+#[include = "*.css"]
+#[include = "*.svg"]
+#[include = "*.png"]
+#[include = "*.ico"]
+#[include = "*.woff"]
+#[include = "*.woff2"]
+#[include = "*.json"]
+struct SpaAssets;
 
 /// 包装 SSE 流并设置 `Content-Type: text/event-stream; charset=utf-8`
 fn sse_utf8<S>(stream: S) -> Response
@@ -59,32 +72,54 @@ pub fn create_router(dashboard: Arc<DashboardState>) -> Router {
         .with_state(dashboard)
 }
 
-/// 创建 Web 前端路由器（SPA 静态文件 + 注入 API 端口配置）
-pub fn create_web_router(web_dir: PathBuf, api_port: u16) -> Router {
-    let index_html = std::fs::read_to_string(web_dir.join("index.html"))
-        .unwrap_or_else(|_| "<html><body>index.html not found</body></html>".into());
+/// 检查 SPA 资源是否已嵌入（编译时 `dist/` 是否存在）
+pub fn has_embedded_spa() -> bool {
+    SpaAssets::get("index.html").is_some()
+}
+
+/// 创建 Web 前端路由器（从编译时嵌入的资源提供 SPA）
+pub fn create_web_router(api_port: u16) -> Router {
+    let raw_index = SpaAssets::get("index.html")
+        .map(|f| String::from_utf8_lossy(&f.data).into_owned())
+        .unwrap_or_else(|| "<html><body>SPA 未嵌入，请先 pnpm build 再编译 Rust</body></html>".into());
 
     let config_script = format!(
         r#"<script>window.__WHISPERDESK_API_PORT__={};</script>"#,
         api_port
     );
-    let modified_html = index_html.replace("</head>", &format!("{config_script}</head>"));
-
-    let fallback = tower::service_fn(move |_req: axum::http::Request<axum::body::Body>| {
-        let body = modified_html.clone();
-        async move {
-            Ok::<_, Infallible>(
-                axum::http::Response::builder()
-                    .header("content-type", "text/html; charset=utf-8")
-                    .body(axum::body::Body::from(body))
-                    .unwrap(),
-            )
-        }
-    });
+    let index_html = raw_index.replace("</head>", &format!("{config_script}</head>"));
 
     Router::new()
-        .fallback_service(ServeDir::new(web_dir).fallback(fallback))
+        .route("/{*path}", get(serve_embedded))
+        .route("/", get({
+            let html = index_html.clone();
+            move || {
+                let h = html.clone();
+                async move { Html(h) }
+            }
+        }))
         .layer(CorsLayer::permissive())
+        .with_state(index_html)
+}
+
+/// 从嵌入资源提供静态文件，未命中时回退到 index.html（SPA 路由）
+async fn serve_embedded(
+    Path(path): Path<String>,
+    State(index_html): State<String>,
+) -> Response {
+    if let Some(file) = SpaAssets::get(&path) {
+        let mime = mime_guess::from_path(&path)
+            .first_or_octet_stream()
+            .to_string();
+        axum::http::Response::builder()
+            .header("content-type", mime)
+            .header("cache-control", "public, max-age=31536000, immutable")
+            .body(axum::body::Body::from(file.data.to_vec()))
+            .unwrap()
+            .into_response()
+    } else {
+        Html(index_html).into_response()
+    }
 }
 
 // ─── 现有路由 ────────────────────────────────────────────────────

@@ -19,16 +19,14 @@ pub async fn stop_api_server(
     state.stop_api().await
 }
 
-/// 启动 Web 前端服务
+/// 启动 Web 前端服务（从编译时嵌入的 SPA 资源提供）
 #[tauri::command]
 pub async fn start_web_server(
     state: State<'_, InferenceServerState>,
     web_port: u16,
     api_port: u16,
 ) -> Result<(), String> {
-    let dir = crate::find_web_dir()
-        .ok_or_else(|| "未找到 SPA 前端文件（dist/ 目录），请先执行 pnpm build".to_string())?;
-    state.start_web(web_port, dir, api_port).await
+    state.start_web(web_port, api_port).await
 }
 
 /// 停止 Web 前端服务

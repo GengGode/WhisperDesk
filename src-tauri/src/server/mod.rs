@@ -1,7 +1,6 @@
 pub mod dashboard;
 pub mod routes;
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use tokio::sync::{Mutex, oneshot};
@@ -112,8 +111,12 @@ impl InferenceServerState {
 
     // ── Web 前端服务 ──
 
-    /// 启动 Web 前端服务（SPA 静态文件 + 注入 API 端口）
-    pub async fn start_web(&self, web_port: u16, web_dir: PathBuf, api_port: u16) -> Result<(), String> {
+    /// 启动 Web 前端服务（从编译时嵌入的 SPA 资源提供）
+    pub async fn start_web(&self, web_port: u16, api_port: u16) -> Result<(), String> {
+        if !routes::has_embedded_spa() {
+            return Err("SPA 资源未嵌入（编译时 dist/ 不存在），请先 pnpm build 再重新编译".into());
+        }
+
         let mut handle_guard = self.web_handle.lock().await;
         if handle_guard.is_some() {
             return Err("Web 前端服务已在运行中".to_string());
@@ -125,7 +128,7 @@ impl InferenceServerState {
             .await
             .map_err(|e| format!("绑定 Web 端口 {web_port} 失败: {e}"))?;
 
-        let router = routes::create_web_router(web_dir, api_port);
+        let router = routes::create_web_router(api_port);
         let svc = router.into_make_service();
 
         let handle = tokio::spawn(async move {
