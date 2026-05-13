@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { IS_TAURI } from "@/lib/tauri";
 
 interface AudioPlayerProps {
   /** Tauri 模式：本地文件路径；浏览器模式：HTTP URL（如 /api/audio/:id） */
@@ -40,7 +38,7 @@ export function AudioPlayer({
     <div className="rounded-lg border border-border bg-surface p-3">
       <audio
         ref={audioRef}
-        src={IS_TAURI ? convertFileSrc(src) : src}
+        src={src}
         preload="metadata"
         onTimeUpdate={(e) => {
           const value = e.currentTarget.currentTime;
