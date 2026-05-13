@@ -1,5 +1,6 @@
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  IS_TAURI,
   deleteModel,
   ensureModel,
   getDashboardStatus,
@@ -7,11 +8,12 @@ import {
   listModels,
   openModelsDir,
   setServerConfig,
-  startInferenceServer,
-  stopInferenceServer,
+  startApiServer,
+  stopApiServer,
+  startWebServer,
+  stopWebServer,
   testRemoteConnection,
 } from "@/lib/tauri";
-import { enable, disable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import type { DashboardSnapshot, ServerStatus, ThemeMode, TranscriptionBackend, WhisperModel } from "@/lib/types";
@@ -65,8 +67,7 @@ export function SettingsPanel() {
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [serverStatus, setServerStatus] = useState<ServerStatus>({ running: false, port: 0 });
-  const [serverLoading, setServerLoading] = useState(false);
+  const [serverStatus, setServerStatus] = useState<ServerStatus>({ running: false, port: 0, webRunning: false, webPort: 0 });
   const pollRef = useRef<ReturnType<typeof setInterval>>(undefined);
 
   const [remoteTestResult, setRemoteTestResult] = useState<string | null>(null);
@@ -120,11 +121,16 @@ export function SettingsPanel() {
   }, [serverStatus.running]);
 
   useEffect(() => {
-    isEnabled().then(setAutoStartEnabled).catch(() => { });
+    if (!IS_TAURI) return;
+    import("@tauri-apps/plugin-autostart").then(({ isEnabled }) =>
+      isEnabled().then(setAutoStartEnabled).catch(() => { })
+    );
   }, []);
 
   const handleAutoStartToggle = async (checked: boolean) => {
+    if (!IS_TAURI) return;
     try {
+      const { enable, disable, isEnabled } = await import("@tauri-apps/plugin-autostart");
       if (checked) await enable(); else await disable();
       setAutoStartEnabled(await isEnabled());
     } catch (e) {
@@ -153,24 +159,46 @@ export function SettingsPanel() {
   }, []);
 
   useEffect(() => {
+    if (!IS_TAURI) return;
     pollServerStatus();
     pollRef.current = setInterval(pollServerStatus, 3000);
     return () => clearInterval(pollRef.current);
   }, [pollServerStatus]);
 
-  const handleToggleServer = async () => {
-    setServerLoading(true);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [webLoading, setWebLoading] = useState(false);
+  const [webWarning, setWebWarning] = useState<string | null>(null);
+
+  const handleToggleApi = async () => {
+    setApiLoading(true);
     try {
       if (serverStatus.running) {
-        await stopInferenceServer();
+        await stopApiServer();
       } else {
-        await startInferenceServer(settings.inferenceServerPort);
+        await startApiServer(settings.inferenceServerPort);
       }
       await pollServerStatus();
     } catch (e) {
       setError(String(e));
     } finally {
-      setServerLoading(false);
+      setApiLoading(false);
+    }
+  };
+
+  const handleToggleWeb = async () => {
+    setWebLoading(true);
+    setWebWarning(null);
+    try {
+      if (serverStatus.webRunning) {
+        await stopWebServer();
+      } else {
+        await startWebServer(settings.webPort, settings.inferenceServerPort);
+      }
+      await pollServerStatus();
+    } catch (e) {
+      setWebWarning(String(e));
+    } finally {
+      setWebLoading(false);
     }
   };
 
@@ -239,31 +267,33 @@ export function SettingsPanel() {
               />
             </div>
 
-            <label className="flex items-center justify-between gap-2">
-              <div>
-                <span className="text-sm font-medium">开机自启</span>
-                <p className="text-xs text-text-secondary">系统启动时自动运行 WhisperDesk</p>
-              </div>
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-border accent-primary"
-                checked={autoStartEnabled}
-                onChange={(e) => handleAutoStartToggle(e.target.checked)}
-              />
-            </label>
+            {IS_TAURI && <>
+              <label className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium">开机自启</span>
+                  <p className="text-xs text-text-secondary">系统启动时自动运行 WhisperDesk</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-primary"
+                  checked={autoStartEnabled}
+                  onChange={(e) => handleAutoStartToggle(e.target.checked)}
+                />
+              </label>
 
-            <label className="flex items-center justify-between gap-2">
-              <div>
-                <span className="text-sm font-medium">静默启动</span>
-                <p className="text-xs text-text-secondary">启动时最小化到系统托盘，不显示主窗口</p>
-              </div>
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-border accent-primary"
-                checked={settings.silentStart}
-                onChange={(e) => setSettings({ silentStart: e.target.checked })}
-              />
-            </label>
+              <label className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium">静默启动</span>
+                  <p className="text-xs text-text-secondary">启动时最小化到系统托盘，不显示主窗口</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-primary"
+                  checked={settings.silentStart}
+                  onChange={(e) => setSettings({ silentStart: e.target.checked })}
+                />
+              </label>
+            </>}
           </div>
         </div>
 
@@ -540,87 +570,125 @@ export function SettingsPanel() {
           </div>
         )}
 
-        {/* 推理服务（供其他设备调用） */}
+        {/* Web 服务 — 两种模式均可见 */}
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-text-secondary">
-            推理服务（供其他设备调用）
+            Web 服务
           </h3>
 
-          <div className="rounded-lg border border-border p-4 space-y-3">
-            <div className="flex items-center gap-3">
-              <label className="flex-1 space-y-1">
-                <span className="text-sm font-medium">端口</span>
-                <input
-                  type="number"
-                  min={1024}
-                  max={65535}
-                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                  value={settings.inferenceServerPort}
-                  onChange={(e) =>
-                    setSettings({ inferenceServerPort: Math.max(1024, Math.min(65535, Number(e.target.value) || 3000)) })
-                  }
-                  disabled={serverStatus.running}
-                />
-              </label>
+          <div className="rounded-lg border border-border p-4 space-y-4">
+            {IS_TAURI ? (
+              <>
+                {/* 后台 API 服务 */}
+                <div className="flex items-center gap-3">
+                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${serverStatus.running ? "bg-green-500" : "bg-gray-400"}`} />
+                  <label className="flex-1 space-y-1">
+                    <span className="text-sm font-medium">后台 API 端口</span>
+                    <input
+                      type="number"
+                      min={1024}
+                      max={65535}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                      value={settings.inferenceServerPort}
+                      onChange={(e) =>
+                        setSettings({ inferenceServerPort: Math.max(1024, Math.min(65535, Number(e.target.value) || 3000)) })
+                      }
+                      disabled={serverStatus.running}
+                    />
+                  </label>
+                  <button
+                    className={`mt-6 shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${serverStatus.running
+                      ? "bg-red-500 hover:bg-red-600"
+                      : "bg-primary hover:bg-primary-hover"
+                      } disabled:opacity-50`}
+                    disabled={apiLoading}
+                    onClick={handleToggleApi}
+                  >
+                    {apiLoading ? "处理中..." : serverStatus.running ? "停止" : "启动"}
+                  </button>
+                </div>
 
-              <button
-                className={`mt-6 shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${serverStatus.running
-                  ? "bg-red-500 hover:bg-red-600"
-                  : "bg-primary hover:bg-primary-hover"
-                  } disabled:opacity-50`}
-                disabled={serverLoading}
-                onClick={handleToggleServer}
-              >
-                {serverLoading ? "处理中..." : serverStatus.running ? "停止服务" : "启动服务"}
-              </button>
-            </div>
+                {/* Web 前端服务 */}
+                <div className="flex items-center gap-3">
+                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${serverStatus.webRunning ? "bg-green-500" : "bg-gray-400"}`} />
+                  <label className="flex-1 space-y-1">
+                    <span className="text-sm font-medium">Web 前端端口</span>
+                    <input
+                      type="number"
+                      min={1024}
+                      max={65535}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                      value={settings.webPort}
+                      onChange={(e) =>
+                        setSettings({ webPort: Math.max(1024, Math.min(65535, Number(e.target.value) || 8080)) })
+                      }
+                      disabled={serverStatus.webRunning}
+                    />
+                  </label>
+                  <button
+                    className={`mt-6 shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${serverStatus.webRunning
+                      ? "bg-red-500 hover:bg-red-600"
+                      : "bg-primary hover:bg-primary-hover"
+                      } disabled:opacity-50`}
+                    disabled={webLoading}
+                    onClick={handleToggleWeb}
+                  >
+                    {webLoading ? "处理中..." : serverStatus.webRunning ? "停止" : "启动"}
+                  </button>
+                </div>
 
-            <label className="flex items-center justify-between gap-2">
-              <div>
-                <span className="text-sm font-medium">随应用启动</span>
-                <p className="text-xs text-text-secondary">开启后每次启动应用时自动开启推理服务</p>
-              </div>
-              <input
-                type="checkbox"
-                className="h-4 w-4 rounded border-border accent-primary"
-                checked={settings.inferenceServerEnabled}
-                onChange={(e) => setSettings({ inferenceServerEnabled: e.target.checked })}
-              />
-            </label>
+                {webWarning && (
+                  <p className="text-xs text-amber-500">⚠ {webWarning}</p>
+                )}
 
-            <div className="flex items-center gap-2 text-xs">
-              <span
-                className={`inline-block h-2 w-2 rounded-full ${serverStatus.running ? "bg-green-500" : "bg-gray-400"
-                  }`}
-              />
-              <span className="text-text-secondary">
-                {serverStatus.running
-                  ? `运行中 :${serverStatus.port}`
-                  : "已停止"}
-              </span>
-            </div>
+                <label className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-sm font-medium">随应用启动</span>
+                    <p className="text-xs text-text-secondary">开启后每次启动应用时自动开启两个服务</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border accent-primary"
+                    checked={settings.inferenceServerEnabled}
+                    onChange={(e) => setSettings({ inferenceServerEnabled: e.target.checked })}
+                  />
+                </label>
 
-            <p className="text-xs text-text-secondary">
-              开启后其他 WhisperDesk 可通过 <code>http://本机IP:{settings.inferenceServerPort}</code> 调用本机推理
-            </p>
+                <p className="text-xs text-text-secondary">
+                  后台 API 提供推理接口和文件管理。Web 前端提供浏览器可访问的远程界面。
+                </p>
 
-            {serverStatus.running && (
-              <p className="text-xs text-text-secondary">
-                浏览器打开{" "}
-                <a
-                  className="text-primary underline"
-                  href={`http://localhost:${serverStatus.port}`}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  http://localhost:{serverStatus.port}
-                </a>
-                {" "}查看完整 Dashboard
-              </p>
+                {serverStatus.webRunning && (
+                  <p className="text-xs text-text-secondary">
+                    浏览器打开{" "}
+                    <a
+                      className="text-primary underline"
+                      href={`http://localhost:${serverStatus.webPort}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      http://localhost:{serverStatus.webPort}
+                    </a>
+                    {" "}即可远程使用
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                  <span className="text-text-secondary">
+                    已连接 — Web: {window.location.host}
+                  </span>
+                </div>
+                <p className="text-xs text-text-secondary">
+                  当前通过 Web 远程访问，部分桌面端功能（导入文件、导出、文件管理器操作）不可用。
+                </p>
+              </>
             )}
           </div>
 
-          {serverStatus.running && dashboard && (
+          {IS_TAURI && serverStatus.running && dashboard && (
             <div className="rounded-lg border border-border p-4 space-y-3">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium">服务状态</span>
@@ -672,7 +740,8 @@ export function SettingsPanel() {
           )}
         </div>
 
-        {/* 远程推理（使用其他设备的推理服务） */}
+        {/* 远程推理（使用其他设备的推理服务） — 仅桌面端显示 */}
+        {IS_TAURI &&
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-text-secondary">
             远程推理（使用其他设备的推理服务）
@@ -708,7 +777,7 @@ export function SettingsPanel() {
               配置后转录将通过远程服务器执行，留空则使用本机推理
             </p>
           </div>
-        </div>
+        </div>}
 
         {/* 模型管理 */}
         <div className="space-y-4">
@@ -716,7 +785,7 @@ export function SettingsPanel() {
             <h3 className="text-sm font-semibold text-text-secondary">
               模型管理
             </h3>
-            <button
+            {IS_TAURI && <button
               className="rounded-md border border-border px-3 py-1 text-xs hover:bg-surface-secondary"
               onClick={async () => {
                 try {
@@ -727,7 +796,7 @@ export function SettingsPanel() {
               }}
             >
               打开模型目录
-            </button>
+            </button>}
           </div>
 
           {/* 下载代理 */}

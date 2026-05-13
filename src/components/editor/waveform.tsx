@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { getAudioPeaks } from "@/lib/tauri";
+import { IS_TAURI, getAudioPeaks } from "@/lib/tauri";
 import type { TranscriptionSegment, VadSegment } from "@/lib/types";
 
 interface WaveformProps {
@@ -167,15 +166,21 @@ export function Waveform({
     setError(null);
     setLoadProgress(0);
 
-    const unlistenPromise = listen<{ audioPath: string; progress: number; peaks: number[] }>(
-      "waveform-progress",
-      (event) => {
-        if (!cancelled && event.payload.audioPath === audioPath) {
-          setLoadProgress(event.payload.progress);
-          setSourcePeaks(event.payload.peaks);
-        }
-      },
-    );
+    let unlistenPromise: Promise<() => void> | undefined;
+    if (IS_TAURI) {
+      import("@tauri-apps/api/event").then(({ listen }) => {
+        if (cancelled) return;
+        unlistenPromise = listen<{ audioPath: string; progress: number; peaks: number[] }>(
+          "waveform-progress",
+          (event) => {
+            if (!cancelled && event.payload.audioPath === audioPath) {
+              setLoadProgress(event.payload.progress);
+              setSourcePeaks(event.payload.peaks);
+            }
+          },
+        );
+      });
+    }
 
     getAudioPeaks(audioPath, SOURCE_PEAKS_COUNT)
       .then((data) => {
@@ -193,7 +198,7 @@ export function Waveform({
 
     return () => {
       cancelled = true;
-      unlistenPromise.then((fn) => fn());
+      unlistenPromise?.then((fn) => fn());
     };
   }, [audioPath]);
 

@@ -202,8 +202,10 @@ export interface AppSettings {
   remoteUrl: string;
   /** 是否开启本机推理服务（供其他设备调用） */
   inferenceServerEnabled: boolean;
-  /** 推理服务监听端口 */
+  /** 推理服务监听端口（后台 API） */
   inferenceServerPort: number;
+  /** Web 前端服务端口 */
+  webPort: number;
   /** 静默启动：启动时最小化到系统托盘 */
   silentStart: boolean;
 
@@ -239,7 +241,10 @@ export interface AppSettings {
 export interface ServerStatus {
   running: boolean;
   port: number;
+  webRunning: boolean;
+  webPort: number;
 }
+
 
 /** CUDA 运行时检测结果 */
 export interface CudaInfo {

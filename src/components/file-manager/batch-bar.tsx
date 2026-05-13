@@ -1,6 +1,6 @@
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
-import { toggleStar, deleteAudioFile } from "@/lib/tauri";
+import { IS_TAURI, toggleStar, deleteAudioFile } from "@/lib/tauri";
 
 interface BatchBarProps {
   onOpenTagEditor: () => void;
@@ -77,12 +77,12 @@ export function BatchBar({ onOpenTagEditor }: BatchBarProps) {
       >
         加标签
       </button>
-      <button
+      {IS_TAURI && <button
         onClick={handleBatchDelete}
         className="rounded-lg bg-surface-secondary px-3 py-1 text-xs font-medium transition-colors hover:bg-red-500/10 hover:text-red-600"
       >
         删除
-      </button>
+      </button>}
 
       <div className="flex-1" />
 

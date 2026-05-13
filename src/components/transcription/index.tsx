@@ -2,10 +2,12 @@ import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  IS_TAURI,
   abortTranscription,
   analyzeVad,
   exportFormats,
   exportTranscription,
+  getAudioUrl,
   getTranscriptionResults,
   transcribeAudio,
 } from "@/lib/tauri";
@@ -245,7 +247,7 @@ export function TranscriptionPanel() {
         )}
 
         <AudioPlayer
-          src={selectedFile.path}
+          src={getAudioUrl(selectedFile.id, selectedFile.path)}
           seekTime={seekTime}
           seekVersion={seekVersion}
           onTimeUpdate={handleTimeUpdate}
@@ -492,7 +494,7 @@ export function TranscriptionPanel() {
                     </>
                   )}
                   <span className="flex-1" />
-                  {exportFormats.map((format) => (
+                  {IS_TAURI && exportFormats.map((format) => (
                     <button
                       key={format}
                       className="rounded-md border border-border px-3 py-1 text-xs hover:bg-surface-secondary"

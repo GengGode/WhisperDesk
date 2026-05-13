@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useAudioStore, type SortField, type StatusFilter } from "@/stores/audio-store";
 import {
+  IS_TAURI,
   importAudioFolder,
   selectAudioFile,
   listenImportFolderProgress,
@@ -107,24 +108,26 @@ export function Toolbar() {
           />
         </div>
 
-        <div ref={importRef} className="relative">
-          <button
-            onClick={() => setImportOpen((v) => !v)}
-            disabled={importProgress !== null}
-            className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
-          >
-            <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            {importProgress ? `${importProgress.current}/${importProgress.total}` : "导入"}
-          </button>
-          {importOpen && (
-            <div className="absolute right-0 top-full z-20 mt-1 w-32 overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
-              <button onClick={handleImportFile} className="flex w-full items-center px-3 py-2 text-sm hover:bg-surface-secondary">导入文件</button>
-              <button onClick={handleImportFolder} className="flex w-full items-center px-3 py-2 text-sm hover:bg-surface-secondary">导入文件夹</button>
-            </div>
-          )}
-        </div>
+        {IS_TAURI && (
+          <div ref={importRef} className="relative">
+            <button
+              onClick={() => setImportOpen((v) => !v)}
+              disabled={importProgress !== null}
+              className="flex items-center gap-1 rounded-lg bg-primary px-3 py-1.5 text-sm text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
+            >
+              <svg className="size-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              {importProgress ? `${importProgress.current}/${importProgress.total}` : "导入"}
+            </button>
+            {importOpen && (
+              <div className="absolute right-0 top-full z-20 mt-1 w-32 overflow-hidden rounded-lg border border-border bg-surface shadow-lg">
+                <button onClick={handleImportFile} className="flex w-full items-center px-3 py-2 text-sm hover:bg-surface-secondary">导入文件</button>
+                <button onClick={handleImportFolder} className="flex w-full items-center px-3 py-2 text-sm hover:bg-surface-secondary">导入文件夹</button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 第二行：状态筛选 + 标签筛选 + 收藏 + 视图切换 + 排序 */}

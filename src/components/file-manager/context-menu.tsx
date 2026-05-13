@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { deleteAudioFile, toggleStar, relocateFolder, relocateFile } from "@/lib/tauri";
+import { IS_TAURI, deleteAudioFile, toggleStar, relocateFolder, relocateFile } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import type { AudioFile, RelocateResult } from "@/lib/types";
@@ -55,7 +54,7 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
     menuRef.current.style.top = `${y}px`;
   });
 
-  const items: { label: string; danger?: boolean; action: () => void }[] = [
+  const items: { label: string; danger?: boolean; action: () => void; tauriOnly?: boolean }[] = [
     {
       label: state.file.starred ? "取消收藏" : "收藏",
       action: async () => {
@@ -86,6 +85,7 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
     },
     {
       label: "重新定位文件",
+      tauriOnly: true,
       action: async () => {
         onClose();
         try {
@@ -100,9 +100,11 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
     },
     {
       label: "在资源管理器中显示",
+      tauriOnly: true,
       action: async () => {
         onClose();
         try {
+          const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
           await revealItemInDir(state.file.path);
         } catch (err) {
           console.error("[文件] 打开资源管理器失败", err);
@@ -111,6 +113,7 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
     },
     {
       label: "复制文件路径",
+      tauriOnly: true,
       action: async () => {
         onClose();
         try {
@@ -123,6 +126,7 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
     {
       label: "从列表中移除",
       danger: true,
+      tauriOnly: true,
       action: async () => {
         onClose();
         try {
@@ -135,13 +139,15 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
     },
   ];
 
+  const visibleItems = items.filter((i) => !i.tauriOnly || IS_TAURI);
+
   return createPortal(
     <div
       ref={menuRef}
       className="fixed z-50 min-w-[160px] overflow-hidden rounded-lg border border-border bg-surface shadow-lg"
       style={{ left: state.x, top: state.y }}
     >
-      {items.map((item, i) => (
+      {visibleItems.map((item, i) => (
         <button
           key={i}
           onClick={item.action}
@@ -218,7 +224,7 @@ export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderCo
 
   const allFiles = collectAllFiles(state.folder);
 
-  const items: { label: string; action: () => void }[] = [
+  const items: { label: string; action: () => void; tauriOnly?: boolean }[] = [
     {
       label: `批量转录（${allFiles.length} 个文件）`,
       action: () => {
@@ -242,6 +248,7 @@ export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderCo
     },
     {
       label: "重新定位文件夹",
+      tauriOnly: true,
       action: async () => {
         onClose();
         try {
@@ -256,10 +263,12 @@ export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderCo
     },
     {
       label: "在资源管理器中显示",
+      tauriOnly: true,
       action: async () => {
         onClose();
         const target = allFiles[0]?.path ?? state.folder.fullPath;
         try {
+          const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
           await revealItemInDir(target);
         } catch (err) {
           console.error("[文件夹] 打开资源管理器失败", err);
@@ -267,6 +276,8 @@ export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderCo
       },
     },
   ];
+
+  const visibleItems = items.filter((i) => !i.tauriOnly || IS_TAURI);
 
   return createPortal(
     <div
@@ -277,7 +288,7 @@ export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderCo
       <div className="border-b border-border px-3 py-1.5 text-xs text-text-secondary truncate">
         {state.folder.name}
       </div>
-      {items.map((item, i) => (
+      {visibleItems.map((item, i) => (
         <button
           key={i}
           onClick={item.action}

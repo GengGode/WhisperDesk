@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
-import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
+  IS_TAURI,
   importAudioFiles,
   listenImportFolderProgress,
   type ImportFolderProgress,
@@ -8,6 +8,13 @@ import {
 import { useAudioStore } from "@/stores/audio-store";
 
 export function ImportDropZone({ children }: { children: React.ReactNode }) {
+  if (!IS_TAURI) {
+    return <div className="relative flex flex-1 flex-col overflow-hidden">{children}</div>;
+  }
+  return <TauriDropZone>{children}</TauriDropZone>;
+}
+
+function TauriDropZone({ children }: { children: React.ReactNode }) {
   const [dragging, setDragging] = useState(false);
   const [importing, setImporting] = useState(false);
   const [progress, setProgress] = useState<ImportFolderProgress | null>(null);
@@ -43,24 +50,33 @@ export function ImportDropZone({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const unlistenPromise = getCurrentWebview().onDragDropEvent((event) => {
+    let cleanup: (() => void) | undefined;
+
+    import("@tauri-apps/api/webview").then(({ getCurrentWebview }) => {
       if (cancelled) return;
-      switch (event.payload.type) {
-        case "enter":
-          setDragging(true);
-          break;
-        case "leave":
-          setDragging(false);
-          break;
-        case "drop":
-          void handleDrop(event.payload.paths);
-          break;
-      }
+      getCurrentWebview()
+        .onDragDropEvent((event) => {
+          if (cancelled) return;
+          switch (event.payload.type) {
+            case "enter":
+              setDragging(true);
+              break;
+            case "leave":
+              setDragging(false);
+              break;
+            case "drop":
+              void handleDrop(event.payload.paths);
+              break;
+          }
+        })
+        .then((off) => {
+          cleanup = off;
+        });
     });
 
     return () => {
       cancelled = true;
-      void unlistenPromise.then((off) => off());
+      cleanup?.();
     };
   }, [handleDrop]);
 

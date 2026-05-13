@@ -39,7 +39,8 @@ tar = "0.4"
 bzip2 = "0.5"
 symphonia = { version = "0.5", features = ["mp3", "aac", "flac", "vorbis", "isomp4", "ogg", "wav"] }
 axum = { version = "0.8", features = ["multipart"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
 tokio-stream = "0.1"
 eventsource-stream = "0.2"
 

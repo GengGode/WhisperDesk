@@ -1,20 +1,23 @@
 use std::convert::Infallible;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use axum::{
-    extract::{ConnectInfo, DefaultBodyLimit, Multipart, State},
+    extract::{ConnectInfo, DefaultBodyLimit, Multipart, Path, State},
     response::{
         sse::{Event, Sse},
         Html, IntoResponse, Response,
     },
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 
-use crate::models::audio::TranscriptionRequest;
+use crate::models::audio::{AudioFileMeta, TranscriptionRequest, TranscriptionResult};
+use crate::services::file_index::FileIndexService;
 use crate::services::transcriber::TranscriberService;
 
 use super::dashboard::DashboardState;
@@ -32,18 +35,59 @@ where
     resp
 }
 
+/// 创建后台 API 路由器（推理 + 文件管理 + Dashboard）
 pub fn create_router(dashboard: Arc<DashboardState>) -> Router {
     Router::new()
         .route("/", get(dashboard_page))
+        .route("/dashboard", get(dashboard_page))
         .route("/api/health", get(health))
         .route("/api/models", get(models))
         .route("/api/transcribe", post(transcribe))
         .route("/api/dashboard", get(dashboard_api))
         .route("/api/dashboard/events", get(dashboard_events))
+        // REST API — 文件管理
+        .route("/api/files", get(list_files))
+        .route("/api/files/{id}/transcriptions", get(get_transcriptions))
+        .route("/api/files/{id}/transcribe", post(transcribe_by_id))
+        .route("/api/files/{id}/star", post(toggle_star))
+        .route("/api/files/{id}/tags", put(set_tags))
+        .route("/api/tags", get(list_tags))
+        .route("/api/audio/{id}", get(stream_audio))
+        .route("/api/cuda", get(cuda_info))
         .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
         .layer(CorsLayer::permissive())
         .with_state(dashboard)
 }
+
+/// 创建 Web 前端路由器（SPA 静态文件 + 注入 API 端口配置）
+pub fn create_web_router(web_dir: PathBuf, api_port: u16) -> Router {
+    let index_html = std::fs::read_to_string(web_dir.join("index.html"))
+        .unwrap_or_else(|_| "<html><body>index.html not found</body></html>".into());
+
+    let config_script = format!(
+        r#"<script>window.__WHISPERDESK_API_PORT__={};</script>"#,
+        api_port
+    );
+    let modified_html = index_html.replace("</head>", &format!("{config_script}</head>"));
+
+    let fallback = tower::service_fn(move |_req: axum::http::Request<axum::body::Body>| {
+        let body = modified_html.clone();
+        async move {
+            Ok::<_, Infallible>(
+                axum::http::Response::builder()
+                    .header("content-type", "text/html; charset=utf-8")
+                    .body(axum::body::Body::from(body))
+                    .unwrap(),
+            )
+        }
+    });
+
+    Router::new()
+        .fallback_service(ServeDir::new(web_dir).fallback(fallback))
+        .layer(CorsLayer::permissive())
+}
+
+// ─── 现有路由 ────────────────────────────────────────────────────
 
 async fn health() -> Json<serde_json::Value> {
     let cuda_info = crate::services::cuda::get_cuda_info();
@@ -61,8 +105,6 @@ async fn models() -> Result<Json<Vec<crate::services::transcriber::ModelInfo>>, 
         .map(Json)
         .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
 }
-
-// ─── Dashboard API ────────────────────────────────────────────────
 
 async fn dashboard_api(
     State(dash): State<Arc<DashboardState>>,
@@ -107,9 +149,8 @@ async fn dashboard_page() -> Html<&'static str> {
     Html(include_str!("dashboard.html"))
 }
 
-// ─── Transcribe ───────────────────────────────────────────────────
+// ─── Multipart 上传转录（原有） ─────────────────────────────────
 
-/// POST /api/transcribe — multipart 接收音频 + 参数，SSE 流式返回进度和结果
 async fn transcribe(
     State(dash): State<Arc<DashboardState>>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -246,7 +287,227 @@ async fn transcribe(
     Ok(sse_utf8(ReceiverStream::new(rx)))
 }
 
-/// 按字符数安全截断 UTF-8 字符串，避免切到多字节字符中间
+// ─── 新增 REST API — 文件管理 ───────────────────────────────────
+
+fn open_index() -> Result<FileIndexService, (axum::http::StatusCode, String)> {
+    let idx = FileIndexService::portable()
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    idx.init()
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok(idx)
+}
+
+async fn list_files() -> Result<Json<Vec<AudioFileMeta>>, (axum::http::StatusCode, String)> {
+    let idx = open_index()?;
+    idx.list_audio()
+        .map(Json)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn get_transcriptions(
+    Path(id): Path<String>,
+) -> Result<Json<Vec<TranscriptionResult>>, (axum::http::StatusCode, String)> {
+    let idx = open_index()?;
+    idx.get_transcription_results(&id)
+        .map(Json)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn list_tags() -> Result<Json<Vec<String>>, (axum::http::StatusCode, String)> {
+    let idx = open_index()?;
+    idx.list_all_tags()
+        .map(Json)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn toggle_star(
+    Path(id): Path<String>,
+) -> Result<Json<bool>, (axum::http::StatusCode, String)> {
+    let idx = open_index()?;
+    idx.toggle_star(&id)
+        .map(Json)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+#[derive(serde::Deserialize)]
+struct SetTagsBody {
+    tags: Vec<String>,
+}
+
+async fn set_tags(
+    Path(id): Path<String>,
+    Json(body): Json<SetTagsBody>,
+) -> Result<(), (axum::http::StatusCode, String)> {
+    let idx = open_index()?;
+    idx.set_tags(&id, &body.tags)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+}
+
+async fn cuda_info() -> Json<serde_json::Value> {
+    let info = crate::services::cuda::get_cuda_info();
+    Json(serde_json::json!({
+        "available": info.available,
+        "message": info.message,
+        "sherpaGpu": info.sherpa_gpu,
+        "sherpaAvailable": info.sherpa_available,
+        "sherpaMessage": info.sherpa_message,
+    }))
+}
+
+// ─── 音频流播放 ──────────────────────────────────────────────────
+
+async fn stream_audio(
+    Path(id): Path<String>,
+) -> Result<Response, (axum::http::StatusCode, String)> {
+    let idx = open_index()?;
+    let file = idx.get_audio_by_id(&id)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((axum::http::StatusCode::NOT_FOUND, "音频文件不存在".to_string()))?;
+
+    let path = std::path::Path::new(&file.path);
+    if !path.exists() {
+        return Err((axum::http::StatusCode::NOT_FOUND, "音频文件磁盘路径不存在".to_string()));
+    }
+
+    let bytes = tokio::fs::read(path).await
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, format!("读取文件失败: {e}")))?;
+
+    let content_type = match file.format.as_str() {
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "ogg" => "audio/ogg",
+        "m4a" | "aac" => "audio/mp4",
+        _ => "application/octet-stream",
+    };
+
+    Ok(Response::builder()
+        .header("Content-Type", content_type)
+        .header("Content-Length", bytes.len().to_string())
+        .header("Accept-Ranges", "bytes")
+        .body(axum::body::Body::from(bytes))
+        .unwrap())
+}
+
+// ─── 按文件 ID 发起转录（SSE 流式返回） ─────────────────────────
+
+/// 浏览器端通过文件 ID 发起转录的请求体
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TranscribeByIdBody {
+    model_name: Option<String>,
+    language: Option<String>,
+    backend: Option<crate::models::audio::TranscriptionBackend>,
+    enable_vad: Option<bool>,
+    enable_punctuation: Option<bool>,
+    initial_prompt: Option<String>,
+    download_proxy: Option<String>,
+}
+
+async fn transcribe_by_id(
+    State(dash): State<Arc<DashboardState>>,
+    Path(id): Path<String>,
+    Json(body): Json<TranscribeByIdBody>,
+) -> Result<Response, (axum::http::StatusCode, String)> {
+    let idx = open_index()?;
+    let file = idx.get_audio_by_id(&id)
+        .map_err(|e| (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((axum::http::StatusCode::NOT_FOUND, "音频文件不存在".to_string()))?;
+
+    let path = std::path::Path::new(&file.path);
+    if !path.exists() {
+        return Err((axum::http::StatusCode::NOT_FOUND, "音频文件磁盘路径不存在".to_string()));
+    }
+
+    let cfg = dash.get_config();
+
+    let request = TranscriptionRequest {
+        audio_file_id: id.clone(),
+        audio_path: file.path.clone(),
+        model_name: body.model_name.unwrap_or(cfg.model_name),
+        language: body.language,
+        threads: Some(cfg.threads),
+        use_gpu: Some(cfg.use_gpu),
+        remote_url: None,
+        best_of: Some(cfg.best_of),
+        suppress_blank: Some(cfg.suppress_blank),
+        suppress_nst: Some(cfg.suppress_nst),
+        no_context: Some(cfg.no_context),
+        entropy_thold: Some(cfg.entropy_thold),
+        logprob_thold: Some(cfg.logprob_thold),
+        no_speech_thold: Some(cfg.no_speech_thold),
+        temperature: Some(cfg.temperature),
+        temperature_inc: Some(cfg.temperature_inc),
+        max_initial_ts: Some(cfg.max_initial_ts),
+        max_repeat_filter: Some(cfg.max_repeat_filter),
+        start_seconds: None,
+        end_seconds: None,
+        enable_vad: body.enable_vad.or(Some(cfg.enable_vad)),
+        vad_config: None,
+        initial_prompt: body.initial_prompt
+            .or(if cfg.initial_prompt.is_empty() { None } else { Some(cfg.initial_prompt) }),
+        enable_punctuation: body.enable_punctuation.or(Some(true)),
+        backend: body.backend,
+        download_proxy: body.download_proxy,
+    };
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
+
+    let file_id = id.clone();
+    tokio::spawn(async move {
+        let transcriber = match TranscriberService::portable() {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = tx.send(Ok(Event::default().event("error").data(e.to_string()))).await;
+                return;
+            }
+        };
+
+        let ptx = tx.clone();
+        let fid = file_id.clone();
+        let on_progress = move |progress: f32, msg: &str| {
+            let d = serde_json::json!({
+                "audioFileId": fid,
+                "progress": progress,
+                "currentSegment": msg,
+                "phase": "local"
+            });
+            let _ = ptx.try_send(Ok(Event::default().event("progress").data(d.to_string())));
+        };
+
+        let mtx = tx.clone();
+        let on_model_dl = move |name: &str, progress: f32| {
+            let d = serde_json::json!({ "modelName": name, "progress": progress });
+            let _ = mtx.try_send(Ok(Event::default().event("model_progress").data(d.to_string())));
+        };
+
+        let ltx = tx.clone();
+        let on_log = move |msg: &str| {
+            let d = serde_json::json!({ "message": msg });
+            let _ = ltx.try_send(Ok(Event::default().event("log").data(d.to_string())));
+        };
+
+        let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        match transcriber.transcribe(on_progress, on_model_dl, on_log, abort_flag, &request).await {
+            Ok(result) => {
+                if let Ok(idx) = FileIndexService::portable() {
+                    let _ = idx.init();
+                    let _ = idx.save_transcription_result(&result);
+                }
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                let _ = tx.send(Ok(Event::default().event("complete").data(json))).await;
+            }
+            Err(e) => {
+                let _ = tx.send(Ok(Event::default().event("error").data(e.to_string()))).await;
+            }
+        }
+    });
+
+    Ok(sse_utf8(ReceiverStream::new(rx)))
+}
+
+// ─── 工具函数 ────────────────────────────────────────────────────
+
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     let mut chars = s.chars();
     let truncated: String = chars.by_ref().take(max_chars).collect();

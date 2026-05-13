@@ -3,10 +3,12 @@ import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import {
+  IS_TAURI,
   getTranscriptionResults,
   updateTranscriptionResult,
   exportTranscription,
   exportFormats,
+  getAudioUrl,
   transcribeAudio,
   analyzeVad,
 } from "@/lib/tauri";
@@ -30,6 +32,7 @@ function formatEditorTime(seconds: number): string {
 
 export function EditorPanel() {
   const resultId = useEditorStore((s) => s.resultId);
+  const audioFileId = useEditorStore((s) => s.audioFileId);
   const audioFilePath = useEditorStore((s) => s.audioFilePath);
   const audioFileName = useEditorStore((s) => s.audioFileName);
   const segments = useEditorStore((s) => s.segments);
@@ -296,7 +299,7 @@ export function EditorPanel() {
           >
             {saving ? "保存中..." : "保存"}
           </button>
-          {exportFormats.map((fmt) => (
+          {IS_TAURI && exportFormats.map((fmt) => (
             <button
               key={fmt}
               className="rounded-md border border-border px-3 py-1 text-xs hover:bg-surface-secondary"
@@ -385,7 +388,7 @@ export function EditorPanel() {
         )}
 
         <AudioPlayer
-          src={audioFilePath}
+          src={audioFileId ? getAudioUrl(audioFileId, audioFilePath) : audioFilePath}
           seekTime={seekTime}
           seekVersion={seekVersion}
           onTimeUpdate={handleTimeUpdate}

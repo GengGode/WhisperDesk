@@ -247,6 +247,37 @@ impl FileIndexService {
         Ok(out)
     }
 
+    /// 通过 ID 查询单个音频文件
+    pub fn get_audio_by_id(&self, id: &str) -> Result<Option<AudioFileMeta>, AppError> {
+        let conn = Connection::open(&self.db_path)?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, path, format, duration, sample_rate, channels, size,
+                    created_at, transcription_status, starred, tags
+             FROM audio_files WHERE id = ?",
+        )?;
+        let mut rows = stmt.query(params![id])?;
+        if let Some(row) = rows.next()? {
+            let tags_json: String = row.get(11)?;
+            let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
+            Ok(Some(AudioFileMeta {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                path: row.get(2)?,
+                format: row.get(3)?,
+                duration: row.get(4)?,
+                sample_rate: row.get(5)?,
+                channels: row.get(6)?,
+                size: row.get(7)?,
+                created_at: row.get(8)?,
+                transcription_status: str_to_status(&row.get::<_, String>(9)?),
+                starred: row.get::<_, i32>(10)? != 0,
+                tags,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// 切换收藏状态，返回新状态
     pub fn toggle_star(&self, id: &str) -> Result<bool, AppError> {
         let conn = Connection::open(&self.db_path)?;

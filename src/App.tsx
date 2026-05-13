@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Sidebar } from "@/components/ui/sidebar";
 import { SidebarItem } from "@/components/ui/sidebar-item";
 import { FileManager } from "@/components/file-manager";
@@ -7,12 +6,14 @@ import { TranscriptionPanel } from "@/components/transcription";
 import { EditorPanel } from "@/components/editor";
 import { SettingsPanel } from "@/components/settings";
 import {
+  IS_TAURI,
   listAudioFiles,
   listAllTags,
   listenModelDownloadProgress,
   listenTranscriptionProgress,
   listenWhisperLog,
-  startInferenceServer,
+  startApiServer,
+  startWebServer,
 } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -35,20 +36,27 @@ function App() {
   useTranscriptionQueue();
 
   useEffect(() => {
-    const { silentStart, inferenceServerEnabled, inferenceServerPort } =
-      useSettingsStore.getState().settings;
-    if (!silentStart) {
-      getCurrentWindow().show();
+    if (IS_TAURI) {
+      const { silentStart, inferenceServerEnabled, inferenceServerPort, webPort } =
+        useSettingsStore.getState().settings;
+      if (!silentStart) {
+        import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
+          getCurrentWindow().show(),
+        );
+      }
+      if (inferenceServerEnabled) {
+        console.log("[App] 自动启动服务，API:", inferenceServerPort, "Web:", webPort);
+        startApiServer(inferenceServerPort).catch((err) =>
+          console.error("[App] API 服务启动失败", err),
+        );
+        startWebServer(webPort, inferenceServerPort).catch((err) =>
+          console.warn("[App] Web 前端启动失败:", err),
+        );
+      }
     }
 
     console.log("[App] 初始化：检测 CUDA");
     void initCuda();
-    if (inferenceServerEnabled) {
-      console.log("[App] 自动启动推理服务，端口:", inferenceServerPort);
-      startInferenceServer(inferenceServerPort).catch((err) =>
-        console.error("[App] 自动启动推理服务失败", err)
-      );
-    }
 
     console.log("[App] 初始化：加载音频列表");
     void listAudioFiles()
