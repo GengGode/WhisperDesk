@@ -255,6 +255,7 @@ export function TranscriptionPanel() {
 
         <Waveform
           audioPath={selectedFile.path}
+          fileId={selectedFile.id}
           currentTime={currentTime}
           duration={selectedFile.duration}
           segments={result?.segments}

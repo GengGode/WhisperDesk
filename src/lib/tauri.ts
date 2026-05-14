@@ -366,14 +366,57 @@ export async function deleteModel(modelName: string): Promise<void> {
 export async function getAudioPeaks(
   audioPath: string,
   numPeaks?: number,
+  fileId?: string,
 ): Promise<WaveformData> {
-  return invoke<WaveformData>("get_audio_peaks", { audioPath, numPeaks });
+  if (IS_TAURI) {
+    return invoke<WaveformData>("get_audio_peaks", { audioPath, numPeaks });
+  }
+  return computePeaksInBrowser(fileId ?? audioPath, numPeaks ?? 8000);
+}
+
+/**
+ * 浏览器模式：通过 Web Audio API 解码音频并计算峰值。
+ * 返回格式与 Rust 端 get_audio_peaks 一致（[min, max] 对的扁平数组）。
+ */
+async function computePeaksInBrowser(
+  fileId: string,
+  numPeaks: number,
+): Promise<WaveformData> {
+  const url = `${API_BASE}/api/audio/${fileId}`;
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`获取音频失败: ${resp.status}`);
+
+  const arrayBuffer = await resp.arrayBuffer();
+  const audioCtx = new AudioContext();
+  const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+
+  const channel = decoded.getChannelData(0);
+  const samplesPerPeak = Math.max(1, Math.floor(channel.length / numPeaks));
+  const actualPeaks = Math.min(numPeaks, Math.ceil(channel.length / samplesPerPeak));
+  const peaks: number[] = new Array(actualPeaks * 2);
+
+  for (let i = 0; i < actualPeaks; i++) {
+    const start = i * samplesPerPeak;
+    const end = Math.min(start + samplesPerPeak, channel.length);
+    let min = Infinity;
+    let max = -Infinity;
+    for (let j = start; j < end; j++) {
+      if (channel[j] < min) min = channel[j];
+      if (channel[j] > max) max = channel[j];
+    }
+    peaks[i * 2] = min;
+    peaks[i * 2 + 1] = max;
+  }
+
+  audioCtx.close();
+  return { peaks, duration: decoded.duration, numPeaks: actualPeaks };
 }
 
 export async function analyzeVad(
   audioPath: string,
   config: VadConfig,
 ): Promise<VadSegment[]> {
+  if (!IS_TAURI) return [];
   return invoke<VadSegment[]>("analyze_vad", { audioPath, config });
 }
 

@@ -4,6 +4,7 @@ import type { TranscriptionSegment, VadSegment } from "@/lib/types";
 
 interface WaveformProps {
   audioPath: string;
+  fileId?: string;
   currentTime: number;
   duration: number;
   segments?: TranscriptionSegment[];
@@ -101,6 +102,7 @@ function setupCanvas(
 
 export function Waveform({
   audioPath,
+  fileId,
   currentTime,
   duration,
   segments,
@@ -182,7 +184,7 @@ export function Waveform({
       });
     }
 
-    getAudioPeaks(audioPath, SOURCE_PEAKS_COUNT)
+    getAudioPeaks(audioPath, SOURCE_PEAKS_COUNT, fileId)
       .then((data) => {
         if (!cancelled) {
           setSourcePeaks(data.peaks);

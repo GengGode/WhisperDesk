@@ -396,6 +396,7 @@ export function EditorPanel() {
 
         <Waveform
           audioPath={audioFilePath}
+          fileId={audioFileId ?? undefined}
           currentTime={currentTime}
           duration={selectedFile.duration}
           segments={segments}
