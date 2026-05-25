@@ -29,6 +29,7 @@ pub fn transcribe_on_thread(
     _duration: f64,
     progress_cb: impl Fn(f32, &str) + Clone + Send + 'static,
     log_cb: impl Fn(&str) + Clone + Send + 'static,
+    partial_cb: impl Fn(&[TranscriptionSegment]) + Clone + Send + 'static,
     abort_flag: Arc<AtomicBool>,
 ) -> Result<(Vec<TranscriptionSegment>, String), AppError> {
     install_logging_hooks();
@@ -220,6 +221,7 @@ pub fn transcribe_on_thread(
 
         let n_segs = state.full_n_segments();
         let mut chunk_last_text: Option<String> = None;
+        let mut new_segments: Vec<TranscriptionSegment> = Vec::new();
 
         for i in 0..n_segs {
             let Some(seg) = state.get_segment(i) else {
@@ -235,11 +237,16 @@ pub fn transcribe_on_thread(
                 continue;
             }
             chunk_last_text = Some(text.clone());
-            all_segments.push(TranscriptionSegment {
+            new_segments.push(TranscriptionSegment {
                 start: seg.start_timestamp() as f64 / 100.0 + chunk_start + time_offset,
                 end: seg.end_timestamp() as f64 / 100.0 + chunk_start + time_offset,
                 text,
             });
+        }
+
+        if !new_segments.is_empty() {
+            partial_cb(&new_segments);
+            all_segments.extend(new_segments);
         }
 
         if let Some(tail) = chunk_last_text {

@@ -31,6 +31,7 @@ pub fn transcribe_on_thread(
     _duration: f64,
     progress_cb: impl Fn(f32, &str) + Clone + Send + 'static,
     log_cb: impl Fn(&str) + Clone + Send + 'static,
+    partial_cb: impl Fn(&[TranscriptionSegment]) + Clone + Send + 'static,
     abort_flag: Arc<AtomicBool>,
     punct_model_path: Option<String>,
 ) -> Result<(Vec<TranscriptionSegment>, String), AppError> {
@@ -149,7 +150,10 @@ pub fn transcribe_on_thread(
             chunk_end - chunk_start,
         );
 
-        all_segments.extend(chunk_segments);
+        if !chunk_segments.is_empty() {
+            partial_cb(&chunk_segments);
+            all_segments.extend(chunk_segments);
+        }
 
         cumulative_samples += chunk_sample_count;
         let progress = 0.05 + (cumulative_samples as f32 / total_voice_samples.max(1) as f32) * 0.90;

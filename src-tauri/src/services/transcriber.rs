@@ -538,11 +538,12 @@ impl TranscriberService {
 
     // ── 转录入口 ──
 
-    pub async fn transcribe<P, M, L>(
+    pub async fn transcribe<P, M, L, S>(
         &self,
         on_progress: P,
         on_model_progress: M,
         on_log: L,
+        on_partial: S,
         abort_flag: Arc<AtomicBool>,
         request: &TranscriptionRequest,
     ) -> Result<TranscriptionResult, AppError>
@@ -550,6 +551,7 @@ impl TranscriberService {
         P: Fn(f32, &str) + Clone + Send + 'static,
         M: Fn(&str, f32) + Clone + Send + 'static,
         L: Fn(&str) + Clone + Send + 'static,
+        S: Fn(&[TranscriptionSegment]) + Clone + Send + 'static,
     {
         let backend = request.backend.clone()
             .unwrap_or_else(|| Self::infer_backend(&request.model_name));
@@ -605,6 +607,7 @@ impl TranscriberService {
         let request_clone = request.clone();
         let progress_cb = on_progress.clone();
         let log_cb = on_log.clone();
+        let partial_cb = on_partial.clone();
         let flag = abort_flag.clone();
 
         // 在独立 OS 线程执行推理，避免阻塞 tokio
@@ -621,6 +624,7 @@ impl TranscriberService {
                         duration,
                         progress_cb.clone(),
                         log_cb.clone(),
+                        partial_cb.clone(),
                         flag,
                     )
                 }
@@ -633,6 +637,7 @@ impl TranscriberService {
                         duration,
                         progress_cb.clone(),
                         log_cb.clone(),
+                        partial_cb.clone(),
                         flag,
                         punct_model_path.clone(),
                     )

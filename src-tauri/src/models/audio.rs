@@ -122,6 +122,14 @@ pub struct TranscriptionProgressPayload {
     pub phase: Option<String>,
 }
 
+/// 转录过程中实时新增的分段事件
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranscriptionPartialPayload {
+    pub audio_file_id: String,
+    pub segments: Vec<TranscriptionSegment>,
+}
+
 /// Whisper 引擎日志事件（转发到前端界面展示）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

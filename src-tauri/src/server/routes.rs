@@ -15,7 +15,9 @@ use rust_embed::Embed;
 use tokio_stream::wrappers::ReceiverStream;
 use tower_http::cors::CorsLayer;
 
-use crate::models::audio::{AudioFileMeta, TranscriptionRequest, TranscriptionResult};
+use crate::models::audio::{
+    AudioFileMeta, TranscriptionPartialPayload, TranscriptionRequest, TranscriptionResult,
+};
 use crate::services::file_index::FileIndexService;
 use crate::services::transcriber::TranscriberService;
 
@@ -302,8 +304,19 @@ async fn transcribe(
             let _ = ltx.try_send(Ok(Event::default().event("log").data(d.to_string())));
         };
 
+        let partial_tx = tx.clone();
+        let tid_partial = task_id_spawn.clone();
+        let on_partial = move |segments: &[crate::models::audio::TranscriptionSegment]| {
+            let payload = TranscriptionPartialPayload {
+                audio_file_id: tid_partial.clone(),
+                segments: segments.to_vec(),
+            };
+            let data = serde_json::to_string(&payload).unwrap_or_default();
+            let _ = partial_tx.try_send(Ok(Event::default().event("partial").data(data)));
+        };
+
         let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        match transcriber.transcribe(on_progress, on_model_dl, on_log, abort_flag, &request).await {
+        match transcriber.transcribe(on_progress, on_model_dl, on_log, on_partial, abort_flag, &request).await {
             Ok(result) => {
                 let summary = Some(truncate_chars(&result.text, 200));
                 dash_spawn.complete_task(&task_id_spawn, summary);
@@ -522,8 +535,19 @@ async fn transcribe_by_id(
             let _ = ltx.try_send(Ok(Event::default().event("log").data(d.to_string())));
         };
 
+        let partial_tx = tx.clone();
+        let fid_partial = file_id.clone();
+        let on_partial = move |segments: &[crate::models::audio::TranscriptionSegment]| {
+            let payload = TranscriptionPartialPayload {
+                audio_file_id: fid_partial.clone(),
+                segments: segments.to_vec(),
+            };
+            let data = serde_json::to_string(&payload).unwrap_or_default();
+            let _ = partial_tx.try_send(Ok(Event::default().event("partial").data(data)));
+        };
+
         let abort_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-        match transcriber.transcribe(on_progress, on_model_dl, on_log, abort_flag, &request).await {
+        match transcriber.transcribe(on_progress, on_model_dl, on_log, on_partial, abort_flag, &request).await {
             Ok(result) => {
                 if let Ok(idx) = FileIndexService::portable() {
                     let _ = idx.init();

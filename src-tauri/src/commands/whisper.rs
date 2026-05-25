@@ -7,8 +7,9 @@ use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 use crate::models::audio::{
-    ExportFormat, ExportRequest, TranscriptionProgressPayload, TranscriptionRequest,
-    TranscriptionResult, UpdateTranscriptionRequest, WhisperLogPayload,
+    ExportFormat, ExportRequest, TranscriptionPartialPayload, TranscriptionProgressPayload,
+    TranscriptionRequest, TranscriptionResult, TranscriptionSegment, UpdateTranscriptionRequest,
+    WhisperLogPayload,
 };
 use crate::models::error::AppError;
 use crate::services::audio::export_wav_clip;
@@ -52,6 +53,33 @@ fn make_progress_cb(window: &Window, audio_file_id: &str, phase: &str) -> impl F
                 progress,
                 current_segment: Some(msg.to_string()),
                 phase: Some(ph.clone()),
+            },
+        );
+    }
+}
+
+fn emit_partial(window: &Window, audio_file_id: &str, segments: Vec<TranscriptionSegment>) {
+    let _ = window.emit(
+        "transcription-partial",
+        TranscriptionPartialPayload {
+            audio_file_id: audio_file_id.to_string(),
+            segments,
+        },
+    );
+}
+
+fn make_partial_cb(window: &Window, audio_file_id: &str) -> impl Fn(&[TranscriptionSegment]) + Clone + Send + 'static {
+    let w = window.clone();
+    let fid = audio_file_id.to_string();
+    move |segments: &[TranscriptionSegment]| {
+        if segments.is_empty() {
+            return;
+        }
+        let _ = w.emit(
+            "transcription-partial",
+            TranscriptionPartialPayload {
+                audio_file_id: fid.clone(),
+                segments: segments.to_vec(),
             },
         );
     }
@@ -149,6 +177,7 @@ pub async fn transcribe_audio(
                 make_progress_cb(&window, &request.audio_file_id, "local"),
                 make_model_dl_cb(&window),
                 log.clone(),
+                make_partial_cb(&window, &request.audio_file_id),
                 flag,
                 &request,
             )
@@ -273,6 +302,11 @@ async fn transcribe_via_remote(
                             let p = v["progress"].as_f64().unwrap_or(0.0) as f32;
                             let msg = v["message"].as_str().unwrap_or("");
                             on_progress(p, msg);
+                        }
+                    }
+                    "partial" => {
+                        if let Ok(v) = serde_json::from_str::<TranscriptionPartialPayload>(&event.data) {
+                            emit_partial(window, &request.audio_file_id, v.segments);
                         }
                     }
                     "complete" => {

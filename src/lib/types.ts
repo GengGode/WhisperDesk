@@ -70,6 +70,12 @@ export interface TranscriptionProgress {
   phase?: "local" | "remote_connecting" | "remote_uploading" | "remote_transcribing" | "complete";
 }
 
+/** 转录过程中的实时新增分段 */
+export interface TranscriptionPartial {
+  audioFileId: string;
+  segments: TranscriptionSegment[];
+}
+
 /** Whisper 引擎日志条目 */
 export interface WhisperLog {
   message: string;

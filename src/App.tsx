@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FileTreeSidebar } from "@/components/ui/file-tree-sidebar";
 import { TopNav } from "@/components/ui/top-nav";
 import { FileManager } from "@/components/file-manager";
+import { LogsPanel } from "@/components/logs";
 import { TranscriptionPanel } from "@/components/transcription";
 import { EditorPanel } from "@/components/editor";
 import { SettingsPanel } from "@/components/settings";
@@ -10,6 +11,7 @@ import {
   listAudioFiles,
   listAllTags,
   listenModelDownloadProgress,
+  listenTranscriptionPartial,
   listenTranscriptionProgress,
   listenWhisperLog,
   startApiServer,
@@ -21,16 +23,18 @@ import { useTranscriptionStore } from "@/stores/transcription-store";
 import { useTranscriptionQueue } from "@/hooks/use-transcription-queue";
 import { useTheme } from "@/hooks/use-theme";
 
-type Page = "files" | "transcription" | "editor" | "settings";
+type Page = "files" | "transcription" | "editor" | "logs" | "settings";
 
 function App() {
   const [page, setPage] = useState<Page>("files");
   const setFiles = useAudioStore((s) => s.setFiles);
   const setAllTags = useAudioStore((s) => s.setAllTags);
+  const appendLiveSegments = useTranscriptionStore((s) => s.appendLiveSegments);
   const setActiveTask = useTranscriptionStore((s) => s.setActiveTask);
   const setModelDownload = useTranscriptionStore((s) => s.setModelDownload);
   const addLog = useTranscriptionStore((s) => s.addLog);
   const initCuda = useSettingsStore((s) => s.initCuda);
+  const showFileTree = page !== "files" && page !== "settings";
 
   useTheme();
   useTranscriptionQueue();
@@ -74,6 +78,9 @@ function App() {
       console.log("[事件] 转录进度", payload);
       setActiveTask(payload.progress >= 1 ? null : payload);
     });
+    const unlistenPartial = listenTranscriptionPartial((payload) => {
+      appendLiveSegments(payload.audioFileId, payload.segments);
+    });
     const unlistenModel = listenModelDownloadProgress((payload) => {
       console.log("[事件] 模型下载进度", payload);
       setModelDownload(payload.progress >= 1 ? null : payload);
@@ -84,20 +91,22 @@ function App() {
 
     return () => {
       void unlistenProgress.then((off) => off());
+      void unlistenPartial.then((off) => off());
       void unlistenModel.then((off) => off());
       void unlistenLog.then((off) => off());
     };
-  }, [initCuda, addLog, setActiveTask, setFiles, setModelDownload, setAllTags]);
+  }, [appendLiveSegments, initCuda, addLog, setActiveTask, setFiles, setModelDownload, setAllTags]);
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden">
       <TopNav page={page} onChangePage={setPage} />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <FileTreeSidebar />
+        {showFileTree && <FileTreeSidebar />}
         <main className="flex min-w-0 flex-1 overflow-hidden">
           {page === "files" && <FileManager />}
           {page === "transcription" && <TranscriptionPanel />}
           {page === "editor" && <EditorPanel />}
+          {page === "logs" && <LogsPanel />}
           {page === "settings" && <SettingsPanel />}
         </main>
       </div>

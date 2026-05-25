@@ -9,6 +9,7 @@ import type {
   RelocateResult,
   ServerConfig,
   ServerStatus,
+  TranscriptionPartial,
   TranscriptionProgress,
   TranscriptionRequest,
   TranscriptionResult,
@@ -61,6 +62,7 @@ function emitBrowserEvent(name: string, detail: unknown) {
 
 interface SSEHandlers {
   onProgress?: (data: TranscriptionProgress) => void;
+  onPartial?: (data: TranscriptionPartial) => void;
   onLog?: (data: { message: string }) => void;
   onModelProgress?: (data: { modelName: string; progress: number }) => void;
 }
@@ -97,6 +99,10 @@ async function readSSEResponse<T>(
                   case "progress":
                     handlers.onProgress?.(data);
                     emitBrowserEvent("transcription-progress", data);
+                    break;
+                  case "partial":
+                    handlers.onPartial?.(data);
+                    emitBrowserEvent("transcription-partial", data);
                     break;
                   case "log":
                     handlers.onLog?.(data);
@@ -288,6 +294,22 @@ export function listenTranscriptionProgress(
   eventBus.addEventListener("transcription-progress", handler);
   return Promise.resolve(() =>
     eventBus.removeEventListener("transcription-progress", handler),
+  );
+}
+
+export function listenTranscriptionPartial(
+  cb: (payload: TranscriptionPartial) => void,
+): Promise<UnlistenFn> {
+  if (IS_TAURI) {
+    return listen<TranscriptionPartial>(
+      "transcription-partial",
+      (event) => cb(event.payload),
+    );
+  }
+  const handler = (e: Event) => cb((e as CustomEvent).detail);
+  eventBus.addEventListener("transcription-partial", handler);
+  return Promise.resolve(() =>
+    eventBus.removeEventListener("transcription-partial", handler),
   );
 }
 
