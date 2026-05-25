@@ -40,3 +40,18 @@ feat: 支持 M4A 格式音频文件
 使用 symphonia 解码器新增对 M4A/AAC 格式的支持，
 同时更新了文件过滤逻辑以识别 .m4a 扩展名。
 ```
+
+## PowerShell 提交命令
+
+PowerShell **不支持** bash heredoc（`<<'EOF'`）语法，执行 `git commit` 时必须使用 PowerShell 兼容方式：
+
+```powershell
+# 单行提交
+git commit -m "feat: 简短描述"
+
+# 多行提交（使用反引号 `n 换行）
+$msg = "feat: 标题`n`n正文第一行`n正文第二行"
+git commit -m $msg
+```
+
+- 禁止在 PowerShell 中使用 `$(cat <<'EOF' ... EOF)` 形式
