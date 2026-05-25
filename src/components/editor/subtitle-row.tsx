@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TranscriptionSegment } from "@/lib/types";
 
 interface SubtitleRowProps {
@@ -9,10 +9,20 @@ interface SubtitleRowProps {
   onTextChange: (index: number, text: string) => void;
   onTimeChange: (index: number, field: "start" | "end", value: number) => void;
   onRemove: (index: number) => void;
-  onSplit: (index: number) => void;
+  onSplit: (index: number, cursorPos?: number) => void;
   onMergeWithNext: (index: number) => void;
   isLast: boolean;
+  /** 注册 textarea 引用，用于外部焦点管理 */
+  registerTextarea?: (index: number, el: HTMLTextAreaElement | null) => void;
+  /** 设置循环播放区间 */
+  onLoopSegment?: (seg: { start: number; end: number } | null) => void;
+  /** 当前是否正在循环播放此段 */
+  isLooping?: boolean;
 }
+
+/** CPS 阈值：<= 正常，<= 警告，> 危险 */
+const CPS_NORMAL = 15;
+const CPS_WARN = 20;
 
 export function SubtitleRow({
   index,
@@ -25,12 +35,42 @@ export function SubtitleRow({
   onSplit,
   onMergeWithNext,
   isLast,
+  registerTextarea,
+  onLoopSegment,
+  isLooping,
 }: SubtitleRowProps) {
   const textRef = useRef<HTMLTextAreaElement>(null);
+
+  const textareaRefCallback = useCallback(
+    (el: HTMLTextAreaElement | null) => {
+      (textRef as React.MutableRefObject<HTMLTextAreaElement | null>).current = el;
+      registerTextarea?.(index, el);
+    },
+    [index, registerTextarea],
+  );
+
   const [editingTime, setEditingTime] = useState<{
     field: "start" | "end";
     value: string;
   } | null>(null);
+
+  // textarea 自适应高度
+  useEffect(() => {
+    const el = textRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [segment.text]);
+
+  const segDuration = segment.end - segment.start;
+  const cps = segDuration > 0 ? segment.text.length / segDuration : 0;
+
+  const cpsColor =
+    cps <= CPS_NORMAL
+      ? "text-emerald-500"
+      : cps <= CPS_WARN
+        ? "text-amber-500"
+        : "text-red-500";
 
   const handleTimeBlur = (field: "start" | "end") => {
     if (!editingTime) return;
@@ -118,11 +158,45 @@ export function SubtitleRow({
             </button>
           )}
 
+          {/* 段落时长 */}
+          <span className="text-[10px] tabular-nums text-text-secondary/60">
+            {segDuration.toFixed(1)}s
+          </span>
+
+          {/* CPS 指示器 */}
+          {segment.text.length > 0 && (
+            <span className={`text-[10px] tabular-nums ${cpsColor}`} title={`${cps.toFixed(1)} 字/秒`}>
+              {cps.toFixed(0)}c/s
+            </span>
+          )}
+
           <div className="ml-auto flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100" onClick={(e) => e.stopPropagation()}>
+            {onLoopSegment && (
+              <button
+                className={`rounded px-1.5 py-0.5 text-xs ${
+                  isLooping
+                    ? "bg-indigo-100 text-indigo-600"
+                    : "text-text-secondary hover:bg-surface-secondary hover:text-text"
+                }`}
+                onClick={() => {
+                  if (isLooping) {
+                    onLoopSegment(null);
+                  } else {
+                    onLoopSegment({ start: segment.start, end: segment.end });
+                  }
+                }}
+                title={isLooping ? "取消循环播放" : "循环播放此段"}
+              >
+                ↻
+              </button>
+            )}
             <button
               className="rounded px-1.5 py-0.5 text-xs text-text-secondary hover:bg-surface-secondary hover:text-text"
-              onClick={() => onSplit(index)}
-              title="拆分段落"
+              onClick={() => {
+                const cursorPos = textRef.current?.selectionStart;
+                onSplit(index, cursorPos ?? undefined);
+              }}
+              title="拆分段落（在光标位置）"
             >
               ÷
             </button>
@@ -146,10 +220,10 @@ export function SubtitleRow({
         </div>
 
         <textarea
-          ref={textRef}
-          className="w-full resize-none rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-relaxed outline-none transition-colors hover:border-border focus:border-primary"
+          ref={textareaRefCallback}
+          className="w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-1 py-0.5 text-sm leading-relaxed outline-none transition-colors hover:border-border focus:border-primary"
+          style={{ minHeight: "1.5em" }}
           value={segment.text}
-          rows={Math.max(1, Math.ceil(segment.text.length / 40))}
           onClick={(e) => e.stopPropagation()}
           onChange={(e) => onTextChange(index, e.target.value)}
         />

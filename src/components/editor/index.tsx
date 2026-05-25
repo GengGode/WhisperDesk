@@ -15,9 +15,13 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ExportFormat, VadConfig, VadSegment } from "@/lib/types";
 import { defaultVadConfig } from "@/lib/types";
-import { AudioPlayer } from "@/components/audio-player";
-import { Waveform } from "./waveform";
-import { SubtitleEditor } from "./subtitle-editor";
+import { AudioPlayer, type AudioPlayerHandle } from "@/components/audio-player";
+import { Waveform, type WaveformRenderContext } from "./waveform";
+import { Timeline } from "./timeline";
+import { ArticleView } from "./article-view";
+import { SubtitleEditor, type SubtitleEditorHandle } from "./subtitle-editor";
+
+type ViewMode = "detail" | "article";
 
 function formatEditorTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -39,6 +43,12 @@ export function EditorPanel() {
   const isDirty = useEditorStore((s) => s.isDirty);
   const loadResult = useEditorStore((s) => s.loadResult);
   const markSaved = useEditorStore((s) => s.markSaved);
+  const undo = useEditorStore((s) => s.undo);
+  const redo = useEditorStore((s) => s.redo);
+  const canUndo = useEditorStore((s) => s.canUndo);
+  const canRedo = useEditorStore((s) => s.canRedo);
+  const updateSegmentTime = useEditorStore((s) => s.updateSegmentTime);
+  const moveSegment = useEditorStore((s) => s.moveSegment);
 
   const selectedFileId = useAudioStore((s) => s.selectedFileId);
   const files = useAudioStore((s) => s.files);
@@ -46,6 +56,9 @@ export function EditorPanel() {
   const setResults = useTranscriptionStore((s) => s.setResults);
   const addResult = useTranscriptionStore((s) => s.addResult);
   const settings = useSettingsStore((s) => s.settings);
+
+  const audioPlayerRef = useRef<AudioPlayerHandle>(null);
+  const subtitleEditorRef = useRef<SubtitleEditorHandle>(null);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -56,6 +69,16 @@ export function EditorPanel() {
   const seekVersionRef = useRef(0);
   const [seekVersion, setSeekVersion] = useState(0);
   const [showParams, setShowParams] = useState(false);
+
+  // 视图模式：详细编辑 / 精简文章
+  const [viewMode, setViewMode] = useState<ViewMode>("detail");
+  // 时间轴是否可见
+  const [showTimeline, setShowTimeline] = useState(true);
+  // 时间轴是否展开
+  const [timelineExpanded, setTimelineExpanded] = useState(false);
+
+  // 循环播放区间
+  const [loopSegment, setLoopSegment] = useState<{ start: number; end: number } | null>(null);
 
   // 区间选区与区间转录状态
   const [selection, setSelection] = useState<{ start: number; end: number } | null>(null);
@@ -131,16 +154,73 @@ export function EditorPanel() {
     loadResult(target, selectedFile.path, selectedFile.name);
   }, [selectedFileId, activeResultIndex, allResults, resultId, selectedFile, loadResult]);
 
-  const activeSegment = useMemo(
-    () => segments.find((seg) => currentTime >= seg.start && currentTime < seg.end),
+  const activeSegmentIndex = useMemo(
+    () => segments.findIndex((seg) => currentTime >= seg.start && currentTime < seg.end),
     [segments, currentTime],
   );
+  const activeSegment = activeSegmentIndex >= 0 ? segments[activeSegmentIndex] : undefined;
 
   const handleSeek = useCallback((time: number) => {
     setSeekTime(time);
     seekVersionRef.current += 1;
     setSeekVersion(seekVersionRef.current);
   }, []);
+
+  // 波形视图状态同步：canvasWidth + scrollLeft → 时间轴
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
+  const [waveCanvasWidth, setWaveCanvasWidth] = useState(800);
+  const waveScrollLeftRef = useRef(0);
+
+  const handleWaveViewChange = useCallback((cw: number, sl: number) => {
+    setWaveCanvasWidth(cw);
+    waveScrollLeftRef.current = sl;
+    if (timelineScrollRef.current) {
+      timelineScrollRef.current.scrollLeft = sl;
+    }
+  }, []);
+
+  // 时间轴重新显示、宽度变化或展开状态变化后，同步到最新的波形横向位置
+  useEffect(() => {
+    const el = timelineScrollRef.current;
+    if (!el || !showTimeline) return;
+    el.scrollLeft = waveScrollLeftRef.current;
+  }, [showTimeline, waveCanvasWidth, timelineExpanded]);
+
+  // 时间轴滚轮：默认横向滚动；Shift 显式改为纵向滚动；Ctrl/Cmd 保留给浏览器/系统
+  useEffect(() => {
+    const el = timelineScrollRef.current;
+    if (!el || !showTimeline) return;
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) return;
+
+      // 某些浏览器/系统会把 Shift+滚轮默认映射成横向滚动，这里显式改成纵向滚动
+      if (e.shiftKey) {
+        if (el.scrollHeight > el.clientHeight) {
+          e.preventDefault();
+          const delta = e.deltaY !== 0 ? e.deltaY : e.deltaX;
+          el.scrollTop += delta;
+        }
+        return;
+      }
+
+      if (el.scrollWidth > el.clientWidth) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [showTimeline]);
+
+  const timelineCtx = useMemo<WaveformRenderContext>(() => {
+    const dur = selectedFile?.duration ?? 0;
+    return {
+      canvasWidth: waveCanvasWidth,
+      duration: dur,
+      timeToX: (t: number) => (dur > 0 ? (t / dur) * waveCanvasWidth : 0),
+      xToTime: (x: number) => (waveCanvasWidth > 0 ? (x / waveCanvasWidth) * dur : 0),
+    };
+  }, [selectedFile?.duration, waveCanvasWidth]);
 
   const handleTimeUpdate = useCallback((time: number) => {
     setCurrentTime(time);
@@ -163,6 +243,51 @@ export function EditorPanel() {
       setSaving(false);
     }
   }, [resultId, saving, segments, markSaved, selectedFileId, setResults]);
+
+  // 全局键盘快捷键
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  const redoRef = useRef(redo);
+  redoRef.current = redo;
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const ctrl = e.ctrlKey || e.metaKey;
+
+      // Ctrl+S 保存
+      if (ctrl && e.key === "s") {
+        e.preventDefault();
+        handleSaveRef.current();
+        return;
+      }
+
+      // Ctrl+Z 撤销
+      if (ctrl && !e.shiftKey && e.key === "z") {
+        e.preventDefault();
+        undoRef.current();
+        return;
+      }
+
+      // Ctrl+Y 或 Ctrl+Shift+Z 重做
+      if ((ctrl && e.key === "y") || (ctrl && e.shiftKey && e.key === "z") || (ctrl && e.shiftKey && e.key === "Z")) {
+        e.preventDefault();
+        redoRef.current();
+        return;
+      }
+
+      // Ctrl+Space 播放/暂停
+      if (ctrl && e.code === "Space") {
+        e.preventDefault();
+        audioPlayerRef.current?.togglePlay();
+        return;
+      }
+    };
+
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
 
   const handleRangeSelect = useCallback((startTime: number, endTime: number) => {
     setSelection({ start: startTime, end: endTime });
@@ -293,6 +418,56 @@ export function EditorPanel() {
         </div>
         <div className="flex items-center gap-2">
           <button
+            disabled={!canUndo}
+            className="rounded-md border border-border px-2 py-1 text-xs hover:bg-surface-secondary disabled:opacity-30"
+            onClick={undo}
+            title="撤销 (Ctrl+Z)"
+          >
+            ↩
+          </button>
+          <button
+            disabled={!canRedo}
+            className="rounded-md border border-border px-2 py-1 text-xs hover:bg-surface-secondary disabled:opacity-30"
+            onClick={redo}
+            title="重做 (Ctrl+Y)"
+          >
+            ↪
+          </button>
+          {/* 视图模式切换 */}
+          <div className="flex rounded-md border border-border text-xs">
+            <button
+              className={`px-2 py-1 transition-colors ${viewMode === "detail" ? "bg-primary/10 text-primary" : "text-text-secondary hover:bg-surface-secondary"}`}
+              onClick={() => setViewMode("detail")}
+              title="详细编辑视图"
+            >
+              详细
+            </button>
+            <button
+              className={`px-2 py-1 transition-colors ${viewMode === "article" ? "bg-primary/10 text-primary" : "text-text-secondary hover:bg-surface-secondary"}`}
+              onClick={() => setViewMode("article")}
+              title="精简文章视图"
+            >
+              文章
+            </button>
+          </div>
+          <button
+            className={`rounded-md border px-2 py-1 text-xs transition-colors ${showTimeline ? "border-primary bg-primary/10 text-primary" : "border-border text-text-secondary hover:bg-surface-secondary"}`}
+            onClick={() => setShowTimeline((v) => !v)}
+            title={showTimeline ? "隐藏时间轴" : "显示时间轴"}
+          >
+            时间轴
+          </button>
+          {loopSegment && (
+            <button
+              className="flex items-center gap-1 rounded-md border border-indigo-300 bg-indigo-50 px-2 py-1 text-xs text-indigo-700 hover:bg-indigo-100"
+              onClick={() => setLoopSegment(null)}
+              title="取消循环播放"
+            >
+              <span>循环中</span>
+              <span>✕</span>
+            </button>
+          )}
+          <button
             disabled={!isDirty || saving}
             className="rounded-lg bg-primary px-4 py-1.5 text-sm text-white transition-colors hover:bg-primary-hover disabled:opacity-50"
             onClick={handleSave}
@@ -388,9 +563,11 @@ export function EditorPanel() {
         )}
 
         <AudioPlayer
+          ref={audioPlayerRef}
           src={audioFileId ? getAudioUrl(audioFileId, audioFilePath) : audioFilePath}
           seekTime={seekTime}
           seekVersion={seekVersion}
+          loopRange={loopSegment}
           onTimeUpdate={handleTimeUpdate}
         />
 
@@ -405,6 +582,8 @@ export function EditorPanel() {
           vadSegments={showVadPanel && vadSegments ? vadSegments : undefined}
           onSeek={handleSeek}
           onRangeSelect={handleRangeSelect}
+          onSegmentTimeChange={updateSegmentTime}
+          onViewChange={handleWaveViewChange}
         />
 
         {/* VAD 分析面板 */}
@@ -547,12 +726,57 @@ export function EditorPanel() {
         )}
       </div>
 
-      {/* 可滚动区域：仅字幕编辑 */}
-      <div className="flex-1 overflow-y-auto p-6">
-        <SubtitleEditor
-          currentTime={currentTime}
-          onSeek={handleSeek}
-        />
+      {/* 时间轴：独立区块，缩放/滚动与波形同步 */}
+      {showTimeline && (
+        <div className="relative shrink-0 border-b border-border px-6 pb-2 pt-8">
+          <button
+            className="absolute right-6 top-2 z-10 rounded-md border border-border bg-surface px-2 py-1 text-xs text-text-secondary transition-colors hover:bg-surface-secondary"
+            onClick={() => setTimelineExpanded((v) => !v)}
+            title={timelineExpanded ? "收起时间轴" : "展开时间轴"}
+          >
+            {timelineExpanded ? "收起" : "展开"}
+          </button>
+          <div
+            ref={timelineScrollRef}
+            className={`overflow-x-auto overflow-y-auto overscroll-contain ${
+              timelineExpanded ? "max-h-[320px]" : "max-h-[160px]"
+            }`}
+          >
+            <Timeline
+              ctx={timelineCtx}
+              segments={segments}
+              activeIndex={activeSegmentIndex >= 0 ? activeSegmentIndex : undefined}
+              onSeekToSegment={(i) => handleSeek(segments[i]?.start ?? 0)}
+              onSegmentTimeChange={updateSegmentTime}
+              onMoveSegment={moveSegment}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 可滚动区域：字幕编辑/文章视图 */}
+      <div className="flex-1 overflow-hidden">
+        {viewMode === "detail" ? (
+          <div className="h-full overflow-y-auto p-6">
+            <SubtitleEditor
+              ref={subtitleEditorRef}
+              currentTime={currentTime}
+              onSeek={handleSeek}
+              onLoopSegment={setLoopSegment}
+              loopSegment={loopSegment}
+            />
+          </div>
+        ) : (
+          <ArticleView
+            segments={segments}
+            activeIndex={activeSegmentIndex >= 0 ? activeSegmentIndex : undefined}
+            onSeekToSegment={(i) => handleSeek(segments[i]?.start ?? 0)}
+            onEditSegment={(i) => {
+              setViewMode("detail");
+              setTimeout(() => subtitleEditorRef.current?.focusRow(i), 50);
+            }}
+          />
+        )}
       </div>
     </div>
   );

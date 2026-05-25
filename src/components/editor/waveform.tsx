@@ -1,6 +1,17 @@
+import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { IS_TAURI, getAudioPeaks } from "@/lib/tauri";
 import type { TranscriptionSegment, VadSegment } from "@/lib/types";
+
+/** renderBelow 回调接收的上下文，用于在波形下方绘制同步滚动内容 */
+export interface WaveformRenderContext {
+  canvasWidth: number;
+  duration: number;
+  /** 时间（秒）转像素 x 坐标 */
+  timeToX: (time: number) => number;
+  /** 像素 x 坐标转时间（秒） */
+  xToTime: (x: number) => number;
+}
 
 interface WaveformProps {
   audioPath: string;
@@ -13,6 +24,12 @@ interface WaveformProps {
   vadSegments?: VadSegment[];
   onSeek?: (time: number) => void;
   onRangeSelect?: (startTime: number, endTime: number) => void;
+  /** 波形上拖拽段落边界时的回调 */
+  onSegmentTimeChange?: (index: number, field: "start" | "end", value: number) => void;
+  /** 在波形滚动容器内部、VAD 条下方渲染额外内容（如时间轴），自动同步横向滚动 */
+  renderBelow?: (ctx: WaveformRenderContext) => React.ReactNode;
+  /** 缩放/宽度变化时通知外部（用于同步时间轴） */
+  onViewChange?: (canvasWidth: number, scrollLeft: number) => void;
 }
 
 const WAVE_COLOR = "#94a3b8";
@@ -27,6 +44,8 @@ const VAD_SILENCE_COLOR = "rgba(148, 163, 184, 0.18)";
 const VAD_BAR_HEIGHT = 12;
 
 const MIN_SELECTION_SECONDS = 0.5;
+const BOUNDARY_HIT_PX = 6;
+const BOUNDARY_HIGHLIGHT_COLOR = "rgba(99, 102, 241, 0.8)";
 const CANVAS_HEIGHT = 80;
 const SOURCE_PEAKS_COUNT = 8000;
 const ZOOM_LEVELS = [1, 1.5, 2, 3, 4, 6, 8, 12, 16, 24, 32];
@@ -111,6 +130,9 @@ export function Waveform({
   vadSegments,
   onSeek,
   onRangeSelect,
+  onSegmentTimeChange,
+  renderBelow,
+  onViewChange,
 }: WaveformProps) {
   const waveCanvasRef = useRef<HTMLCanvasElement>(null);
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -131,7 +153,32 @@ export function Waveform({
   const rightDragStartRef = useRef(0);
   const [rightDragSelection, setRightDragSelection] = useState<{ start: number; end: number } | null>(null);
 
+  // 段落边界拖拽状态
+  const [hoveredBoundary, setHoveredBoundary] = useState<{
+    segIndex: number;
+    field: "start" | "end";
+    px: number;
+  } | null>(null);
+  const [isBoundaryDragging, setIsBoundaryDragging] = useState(false);
+  const boundaryDragRef = useRef<{ segIndex: number; field: "start" | "end" } | null>(null);
+
   const canvasWidth = Math.floor(containerWidth * zoom);
+
+  // 为 renderBelow 提供的上下文（时间↔像素换算）
+  const renderContext = useMemo<WaveformRenderContext>(
+    () => ({
+      canvasWidth,
+      duration,
+      timeToX: (time: number) => (duration > 0 ? (time / duration) * canvasWidth : 0),
+      xToTime: (x: number) => (canvasWidth > 0 ? (x / canvasWidth) * duration : 0),
+    }),
+    [canvasWidth, duration],
+  );
+
+  // canvasWidth 变化时通知外部
+  useEffect(() => {
+    onViewChange?.(canvasWidth, scrollRef.current?.scrollLeft ?? 0);
+  }, [canvasWidth, onViewChange]);
 
   // 滚轮缩放锚点：记录缩放时鼠标指向的时间比例和鼠标 x 偏移
   const zoomAnchorRef = useRef<{ ratio: number; mouseX: number } | null>(null);
@@ -356,6 +403,16 @@ export function Waveform({
       }
     }
 
+    // 边界悬停/拖拽高亮
+    if (hoveredBoundary) {
+      ctx.strokeStyle = BOUNDARY_HIGHLIGHT_COLOR;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(hoveredBoundary.px, 0);
+      ctx.lineTo(hoveredBoundary.px, CANVAS_HEIGHT);
+      ctx.stroke();
+    }
+
     // 播放指针
     const progressX = (currentTime / duration) * canvasWidth;
     if (progressX > 0) {
@@ -366,7 +423,7 @@ export function Waveform({
       ctx.lineTo(progressX, CANVAS_HEIGHT);
       ctx.stroke();
     }
-  }, [currentTime, duration, canvasWidth, selection, rightDragSelection]);
+  }, [currentTime, duration, canvasWidth, selection, rightDragSelection, hoveredBoundary]);
 
   // ─── VAD 指示条：独立 canvas，波形图下方 ───
   useEffect(() => {
@@ -402,12 +459,42 @@ export function Waveform({
     [duration, canvasWidth],
   );
 
+  /** 检测鼠标是否靠近某个段落边界，返回最近的命中结果 */
+  const findBoundaryHit = useCallback(
+    (clientX: number): { segIndex: number; field: "start" | "end"; px: number } | null => {
+      if (!segments || segments.length === 0 || duration <= 0) return null;
+      const canvas = overlayCanvasRef.current;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = clientX - rect.left;
+
+      let best: { segIndex: number; field: "start" | "end"; px: number; dist: number } | null = null;
+
+      for (let i = 0; i < segments.length; i++) {
+        const seg = segments[i];
+        const startPx = (seg.start / duration) * canvasWidth;
+        const endPx = (seg.end / duration) * canvasWidth;
+
+        const dStart = Math.abs(mouseX - startPx);
+        if (dStart < BOUNDARY_HIT_PX && (!best || dStart < best.dist)) {
+          best = { segIndex: i, field: "start", px: startPx, dist: dStart };
+        }
+        const dEnd = Math.abs(mouseX - endPx);
+        if (dEnd < BOUNDARY_HIT_PX && (!best || dEnd < best.dist)) {
+          best = { segIndex: i, field: "end", px: endPx, dist: dEnd };
+        }
+      }
+
+      return best ? { segIndex: best.segIndex, field: best.field, px: best.px } : null;
+    },
+    [segments, duration, canvasWidth],
+  );
+
   const handleMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (duration <= 0) return;
 
       if (e.button === 2 && onRangeSelect) {
-        // 右键：启动选区拖拽
         e.preventDefault();
         const time = getTimeFromClientX(e.clientX);
         rightDragStartRef.current = time;
@@ -416,13 +503,23 @@ export function Waveform({
         return;
       }
 
-      // 左键：seek
-      if (e.button === 0 && onSeek) {
-        setIsDragging(true);
-        onSeek(getTimeFromClientX(e.clientX));
+      // 左键：优先判断是否点在段落边界上
+      if (e.button === 0) {
+        const hit = onSegmentTimeChange ? findBoundaryHit(e.clientX) : null;
+        if (hit) {
+          e.preventDefault();
+          boundaryDragRef.current = { segIndex: hit.segIndex, field: hit.field };
+          setIsBoundaryDragging(true);
+          return;
+        }
+
+        if (onSeek) {
+          setIsDragging(true);
+          onSeek(getTimeFromClientX(e.clientX));
+        }
       }
     },
-    [onSeek, onRangeSelect, duration, getTimeFromClientX],
+    [onSeek, onRangeSelect, onSegmentTimeChange, duration, getTimeFromClientX, findBoundaryHit],
   );
 
   const handleMouseMove = useCallback(
@@ -432,13 +529,22 @@ export function Waveform({
       const rect = canvas.getBoundingClientRect();
       const x = e.clientX - rect.left;
       setHoverInfo({ x, time: getTimeFromClientX(e.clientX) });
+
+      // 边界悬停检测（非拖拽状态下）
+      if (!isDragging && !isRightDragging && !isBoundaryDragging && onSegmentTimeChange) {
+        const hit = findBoundaryHit(e.clientX);
+        setHoveredBoundary(hit);
+      }
     },
-    [duration, getTimeFromClientX],
+    [duration, getTimeFromClientX, isDragging, isRightDragging, isBoundaryDragging, onSegmentTimeChange, findBoundaryHit],
   );
 
   const handleMouseLeave = useCallback(() => {
-    if (!isDragging) setHoverInfo(null);
-  }, [isDragging]);
+    if (!isDragging && !isBoundaryDragging) {
+      setHoverInfo(null);
+      setHoveredBoundary(null);
+    }
+  }, [isDragging, isBoundaryDragging]);
 
   // 左键拖拽期间：跟随鼠标持续 seek，松开结束
   useEffect(() => {
@@ -493,6 +599,51 @@ export function Waveform({
     };
   }, [isRightDragging, getTimeFromClientX, onRangeSelect]);
 
+  // 段落边界拖拽
+  useEffect(() => {
+    if (!isBoundaryDragging || !onSegmentTimeChange || !segments) return;
+
+    const handleMove = (e: MouseEvent) => {
+      const info = boundaryDragRef.current;
+      if (!info) return;
+      let newTime = getTimeFromClientX(e.clientX);
+      const seg = segments[info.segIndex];
+      if (!seg) return;
+
+      // 约束边界不越过相邻段落
+      if (info.field === "start") {
+        const prevEnd = info.segIndex > 0 ? segments[info.segIndex - 1].start : 0;
+        newTime = Math.max(prevEnd + 0.01, Math.min(seg.end - 0.01, newTime));
+      } else {
+        const nextStart = info.segIndex < segments.length - 1 ? segments[info.segIndex + 1].end : duration;
+        newTime = Math.max(seg.start + 0.01, Math.min(nextStart - 0.01, newTime));
+      }
+
+      onSegmentTimeChange(info.segIndex, info.field, newTime);
+
+      const canvas = overlayCanvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const px = (newTime / duration) * canvasWidth;
+        setHoverInfo({ x: e.clientX - rect.left, time: newTime });
+        setHoveredBoundary({ segIndex: info.segIndex, field: info.field, px });
+      }
+    };
+
+    const handleUp = () => {
+      setIsBoundaryDragging(false);
+      boundaryDragRef.current = null;
+      setHoveredBoundary(null);
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+    };
+  }, [isBoundaryDragging, onSegmentTimeChange, segments, duration, canvasWidth, getTimeFromClientX]);
+
   if (error) {
     return (
       <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-600">
@@ -508,12 +659,17 @@ export function Waveform({
           正在生成波形...
         </div>
       ) : (
-        <div ref={scrollRef} className="overflow-x-auto overflow-y-hidden rounded">
+        <div
+          ref={scrollRef}
+          className="overflow-x-auto overflow-y-hidden rounded"
+          onScroll={() => onViewChange?.(canvasWidth, scrollRef.current?.scrollLeft ?? 0)}
+        >
           <div className="relative" style={{ width: canvasWidth, height: CANVAS_HEIGHT }}>
             <canvas ref={waveCanvasRef} className="absolute inset-0" />
             <canvas
               ref={overlayCanvasRef}
-              className="absolute inset-0 cursor-pointer"
+              className="absolute inset-0"
+              style={{ cursor: hoveredBoundary || isBoundaryDragging ? "col-resize" : "pointer" }}
               onMouseDown={handleMouseDown}
               onMouseMove={handleMouseMove}
               onMouseLeave={handleMouseLeave}
@@ -535,6 +691,7 @@ export function Waveform({
               className="mt-0.5"
             />
           )}
+          {renderBelow && renderBelow(renderContext)}
         </div>
       )}
       <div className="mt-2 flex items-center gap-2">
