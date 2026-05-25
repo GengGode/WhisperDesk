@@ -53,7 +53,7 @@ const NAV_ITEMS: Array<{ id: Page; label: string; icon: React.ReactNode }> = [
   },
   {
     id: "logs",
-    label: "日志",
+    label: "队列日志",
     icon: (
       <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path
