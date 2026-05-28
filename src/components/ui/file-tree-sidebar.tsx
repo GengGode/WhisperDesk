@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildFileTree, type FolderNode } from "@/lib/file-tree";
 import type { AudioFile, TranscriptionStatus } from "@/lib/types";
 import { useAudioStore } from "@/stores/audio-store";
@@ -10,11 +10,92 @@ const STATUS_COLOR: Record<TranscriptionStatus, string> = {
   failed: "bg-red-500",
 };
 
+const SIDEBAR_WIDTH_STORAGE_KEY = "whisperdesk.fileTreeSidebar.width";
+const SIDEBAR_DEFAULT_WIDTH = 224;
+const SIDEBAR_MIN_WIDTH = 160;
+const SIDEBAR_MAX_WIDTH = 560;
+
+function loadInitialWidth(): number {
+  if (typeof window === "undefined") return SIDEBAR_DEFAULT_WIDTH;
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+    if (!raw) return SIDEBAR_DEFAULT_WIDTH;
+    const parsed = Number.parseInt(raw, 10);
+    if (Number.isNaN(parsed)) return SIDEBAR_DEFAULT_WIDTH;
+    return clampWidth(parsed);
+  } catch {
+    return SIDEBAR_DEFAULT_WIDTH;
+  }
+}
+
+function clampWidth(width: number): number {
+  if (width < SIDEBAR_MIN_WIDTH) return SIDEBAR_MIN_WIDTH;
+  if (width > SIDEBAR_MAX_WIDTH) return SIDEBAR_MAX_WIDTH;
+  return width;
+}
+
 export function FileTreeSidebar() {
   const files = useAudioStore((s) => s.files);
   const selectedFileId = useAudioStore((s) => s.selectedFileId);
   const expandedFolders = useAudioStore((s) => s.expandedFolders);
   const expandAllFolders = useAudioStore((s) => s.expandAllFolders);
+
+  const [width, setWidth] = useState<number>(loadInitialWidth);
+  const [resizing, setResizing] = useState(false);
+  const dragStateRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  useEffect(() => {
+    if (!resizing) return;
+
+    const handleMove = (e: MouseEvent) => {
+      const drag = dragStateRef.current;
+      if (!drag) return;
+      const delta = e.clientX - drag.startX;
+      setWidth(clampWidth(drag.startWidth + delta));
+    };
+
+    const handleUp = () => {
+      dragStateRef.current = null;
+      setResizing(false);
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    // 拖拽期间禁用文本选中与切换全局光标
+    const prevUserSelect = document.body.style.userSelect;
+    const prevCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      document.body.style.userSelect = prevUserSelect;
+      document.body.style.cursor = prevCursor;
+    };
+  }, [resizing]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(width));
+    } catch {
+      // 忽略持久化失败
+    }
+  }, [width]);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      dragStateRef.current = { startX: e.clientX, startWidth: width };
+      setResizing(true);
+    },
+    [width],
+  );
+
+  const handleResizeDoubleClick = useCallback(() => {
+    setWidth(SIDEBAR_DEFAULT_WIDTH);
+  }, []);
 
   const sortedFiles = useMemo(
     () =>
@@ -48,7 +129,10 @@ export function FileTreeSidebar() {
   }, [expandAllFolders, expandedFolders, selectedFile]);
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-border bg-surface-secondary/40">
+    <aside
+      className="relative flex shrink-0 flex-col border-r border-border bg-surface-secondary/40"
+      style={{ width: `${width}px` }}
+    >
       <div className="border-b border-border px-3 py-2">
         <p className="text-sm font-medium">文件树</p>
         <p className="mt-0.5 text-xs text-text-secondary">
@@ -71,6 +155,22 @@ export function FileTreeSidebar() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* 右侧拖拽手柄：拖动调整宽度，双击恢复默认 */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="调整文件树宽度"
+        onMouseDown={handleResizeStart}
+        onDoubleClick={handleResizeDoubleClick}
+        className="group absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize select-none"
+      >
+        <div
+          className={`mx-auto h-full w-px transition-colors ${
+            resizing ? "bg-primary" : "bg-transparent group-hover:bg-primary/60"
+          }`}
+        />
       </div>
     </aside>
   );
