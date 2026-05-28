@@ -12,6 +12,16 @@ import { useSettingsStore } from "@/stores/settings-store";
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 
+const WAVEFORM_STORAGE_KEY = "whisperdesk.transcriptionShowWaveform";
+
+function readStoredShowWaveform(): boolean {
+  try {
+    return localStorage.getItem(WAVEFORM_STORAGE_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
 export function TranscriptionPanel() {
   const selectedFileId = useAudioStore((s) => s.selectedFileId);
   const files = useAudioStore((s) => s.files);
@@ -30,6 +40,7 @@ export function TranscriptionPanel() {
   const [seekTime, setSeekTime] = useState(0);
   const [seekVersion, setSeekVersion] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
+  const [showWaveform, setShowWaveform] = useState(readStoredShowWaveform);
   const seekVersionRef = useRef(0);
 
   const selectedFile = files.find((file) => file.id === selectedFileId);
@@ -164,7 +175,24 @@ export function TranscriptionPanel() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary select-none">
+            <input
+              type="checkbox"
+              className="accent-primary"
+              checked={showWaveform}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setShowWaveform(next);
+                try {
+                  localStorage.setItem(WAVEFORM_STORAGE_KEY, String(next));
+                } catch {
+                  /* 忽略存储失败 */
+                }
+              }}
+            />
+            显示波形图
+          </label>
           {isCurrentFileTranscribing ? (
             <button
               type="button"
@@ -209,14 +237,16 @@ export function TranscriptionPanel() {
           onTimeUpdate={handleTimeUpdate}
         />
 
-        <Waveform
-          audioPath={selectedFile.path}
-          fileId={selectedFile.id}
-          currentTime={currentTime}
-          duration={selectedFile.duration}
-          segments={displaySegments}
-          onSeek={handleSeek}
-        />
+        {showWaveform && (
+          <Waveform
+            audioPath={selectedFile.path}
+            fileId={selectedFile.id}
+            currentTime={currentTime}
+            duration={selectedFile.duration}
+            segments={displaySegments}
+            onSeek={handleSeek}
+          />
+        )}
 
         {isCurrentFileTranscribing && activeTask && (
           <div className="space-y-2">
