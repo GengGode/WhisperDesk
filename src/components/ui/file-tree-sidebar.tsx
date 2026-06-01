@@ -115,7 +115,10 @@ export function FileTreeSidebar() {
     const folderPaths = getAncestorPaths(selectedFile.path);
     if (folderPaths.length === 0) return;
 
-    const next = new Set(expandedFolders);
+    // 通过 getState() 读取最新状态，避免 expandedFolders 变化导致
+    // 本 effect 重复执行，阻止用户手动折叠文件夹
+    const currentExpanded = useAudioStore.getState().expandedFolders;
+    const next = new Set(currentExpanded);
     let changed = false;
     for (const folderPath of folderPaths) {
       if (!next.has(folderPath)) {
@@ -126,7 +129,8 @@ export function FileTreeSidebar() {
     if (changed) {
       expandAllFolders(Array.from(next));
     }
-  }, [expandAllFolders, expandedFolders, selectedFile]);
+    // expandedFolders 不在依赖中，确保只在 selectedFile 变化时自动展开
+  }, [expandAllFolders, selectedFile]);
 
   return (
     <aside
