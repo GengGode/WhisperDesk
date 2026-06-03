@@ -206,8 +206,10 @@ export interface AppSettings {
   useGpu: boolean;
   /** 远程推理服务器地址，留空表示使用本机推理 */
   remoteUrl: string;
-  /** 是否开启本机推理服务（供其他设备调用） */
-  inferenceServerEnabled: boolean;
+  /** 启动后自动开启后台 API 推理服务（供其他设备调用） */
+  apiAutoStart: boolean;
+  /** 启动后自动开启 Web 前端服务（浏览器远程访问） */
+  webAutoStart: boolean;
   /** 推理服务监听端口（后台 API） */
   inferenceServerPort: number;
   /** Web 前端服务端口 */

@@ -41,18 +41,21 @@ function App() {
 
   useEffect(() => {
     if (IS_TAURI) {
-      const { silentStart, inferenceServerEnabled, inferenceServerPort, webPort } =
+      const { silentStart, apiAutoStart, webAutoStart, inferenceServerPort, webPort } =
         useSettingsStore.getState().settings;
       if (!silentStart) {
         import("@tauri-apps/api/window").then(({ getCurrentWindow }) =>
           getCurrentWindow().show(),
         );
       }
-      if (inferenceServerEnabled) {
-        console.log("[App] 自动启动服务，API:", inferenceServerPort, "Web:", webPort);
+      if (apiAutoStart) {
+        console.log("[App] 自动启动 API 服务，端口:", inferenceServerPort);
         startApiServer(inferenceServerPort).catch((err) =>
           console.error("[App] API 服务启动失败", err),
         );
+      }
+      if (webAutoStart) {
+        console.log("[App] 自动启动 Web 界面，端口:", webPort);
         startWebServer(webPort, inferenceServerPort).catch((err) =>
           console.warn("[App] Web 前端启动失败:", err),
         );

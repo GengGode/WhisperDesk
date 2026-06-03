@@ -643,14 +643,27 @@ export function SettingsPanel() {
 
                 <label className="flex items-center justify-between gap-2">
                   <div>
-                    <span className="text-sm font-medium">随应用启动</span>
-                    <p className="text-xs text-text-secondary">开启后每次启动应用时自动开启两个服务</p>
+                    <span className="text-sm font-medium">启动后自动开启 API 服务</span>
+                    <p className="text-xs text-text-secondary">每次启动应用时自动开启后台 API 推理服务</p>
                   </div>
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded border-border accent-primary"
-                    checked={settings.inferenceServerEnabled}
-                    onChange={(e) => setSettings({ inferenceServerEnabled: e.target.checked })}
+                    checked={settings.apiAutoStart}
+                    onChange={(e) => setSettings({ apiAutoStart: e.target.checked })}
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-sm font-medium">启动后自动开启 Web 界面</span>
+                    <p className="text-xs text-text-secondary">每次启动应用时自动开启 Web 前端，提供浏览器远程访问</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border accent-primary"
+                    checked={settings.webAutoStart}
+                    onChange={(e) => setSettings({ webAutoStart: e.target.checked })}
                   />
                 </label>
 
