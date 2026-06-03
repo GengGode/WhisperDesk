@@ -301,6 +301,273 @@ export function SettingsPanel() {
           </div>
         </div>
 
+        {/* Web 服务 — 两种模式均可见 */}
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-text-secondary">
+            Web 服务
+          </h3>
+
+          <div className="rounded-lg border border-border p-4 space-y-4">
+            {IS_TAURI ? (
+              <>
+                {/* 后台 API 服务 */}
+                <div className="flex items-center gap-3">
+                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${serverStatus.running ? "bg-green-500" : "bg-gray-400"}`} />
+                  <label className="flex-1 space-y-1">
+                    <span className="text-sm font-medium">后台 API 端口</span>
+                    <input
+                      type="number"
+                      min={1024}
+                      max={65535}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                      value={settings.inferenceServerPort}
+                      onChange={(e) =>
+                        setSettings({ inferenceServerPort: Math.max(1024, Math.min(65535, Number(e.target.value) || 3000)) })
+                      }
+                      disabled={serverStatus.running}
+                    />
+                  </label>
+                  <button
+                    className={`mt-6 shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${serverStatus.running
+                      ? "bg-red-500 hover:bg-red-600"
+                      : "bg-primary hover:bg-primary-hover"
+                      } disabled:opacity-50`}
+                    disabled={apiLoading}
+                    onClick={handleToggleApi}
+                  >
+                    {apiLoading ? "处理中..." : serverStatus.running ? "停止" : "启动"}
+                  </button>
+                </div>
+
+                {/* Web 前端服务 */}
+                <div className="flex items-center gap-3">
+                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${serverStatus.webRunning ? "bg-green-500" : "bg-gray-400"}`} />
+                  <label className="flex-1 space-y-1">
+                    <span className="text-sm font-medium">Web 前端端口</span>
+                    <input
+                      type="number"
+                      min={1024}
+                      max={65535}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                      value={settings.webPort}
+                      onChange={(e) =>
+                        setSettings({ webPort: Math.max(1024, Math.min(65535, Number(e.target.value) || 8080)) })
+                      }
+                      disabled={serverStatus.webRunning}
+                    />
+                  </label>
+                  <button
+                    className={`mt-6 shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${serverStatus.webRunning
+                      ? "bg-red-500 hover:bg-red-600"
+                      : "bg-primary hover:bg-primary-hover"
+                      } disabled:opacity-50`}
+                    disabled={webLoading}
+                    onClick={handleToggleWeb}
+                  >
+                    {webLoading ? "处理中..." : serverStatus.webRunning ? "停止" : "启动"}
+                  </button>
+                </div>
+
+                {webWarning && (
+                  <p className="text-xs text-amber-500">⚠ {webWarning}</p>
+                )}
+
+                <div className="border-t border-border pt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-sm font-medium">访问鉴权</span>
+                      <p className="text-xs text-text-secondary">为 Web 服务添加简单的用户名/密码验证</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border accent-primary"
+                      checked={settings.authEnabled}
+                      onChange={(e) => setSettings({ authEnabled: e.target.checked })}
+                    />
+                  </div>
+
+                  {settings.authEnabled && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block space-y-1">
+                        <span className="text-xs font-medium text-text-secondary">用户名</span>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                          placeholder="admin"
+                          value={settings.authUsername}
+                          onChange={(e) => setSettings({ authUsername: e.target.value })}
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-xs font-medium text-text-secondary">密码</span>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                          placeholder="••••••"
+                          value={settings.authPassword}
+                          onChange={(e) => setSettings({ authPassword: e.target.value })}
+                        />
+                      </label>
+                    </div>
+                  )}
+                  {settings.authEnabled && (
+                    <p className="text-xs text-text-secondary">
+                      启用后访问 Web 服务需要输入用户名和密码。修改鉴权配置后需重启服务生效。
+                    </p>
+                  )}
+                </div>
+
+                <label className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-sm font-medium">启动后自动开启 API 服务</span>
+                    <p className="text-xs text-text-secondary">每次启动应用时自动开启后台 API 推理服务</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border accent-primary"
+                    checked={settings.apiAutoStart}
+                    onChange={(e) => setSettings({ apiAutoStart: e.target.checked })}
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-2">
+                  <div>
+                    <span className="text-sm font-medium">启动后自动开启 Web 界面</span>
+                    <p className="text-xs text-text-secondary">每次启动应用时自动开启 Web 前端，提供浏览器远程访问</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 rounded border-border accent-primary"
+                    checked={settings.webAutoStart}
+                    onChange={(e) => setSettings({ webAutoStart: e.target.checked })}
+                  />
+                </label>
+
+                <p className="text-xs text-text-secondary">
+                  后台 API 提供推理接口和文件管理。Web 前端提供浏览器可访问的远程界面。
+                </p>
+
+                {serverStatus.webRunning && (
+                  <p className="text-xs text-text-secondary">
+                    浏览器打开{" "}
+                    <a
+                      className="text-primary underline"
+                      href={`http://localhost:${serverStatus.webPort}`}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      http://localhost:{serverStatus.webPort}
+                    </a>
+                    {" "}即可远程使用
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+                  <span className="text-text-secondary">
+                    已连接 — Web: {window.location.host}
+                  </span>
+                </div>
+                <p className="text-xs text-text-secondary">
+                  当前通过 Web 远程访问，部分桌面端功能（导入文件、导出、文件管理器操作）不可用。
+                </p>
+              </>
+            )}
+          </div>
+
+          {IS_TAURI && serverStatus.running && dashboard && (
+            <div className="rounded-lg border border-border p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">服务状态</span>
+                <span className="text-xs text-text-secondary">
+                  GPU: {dashboard.gpu ? "可用" : "不可用"}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-md border border-border p-2.5 text-center">
+                  <div className="text-lg font-bold text-blue-500">{dashboard.activeTasks.length}</div>
+                  <div className="text-[10px] text-text-secondary">活跃任务</div>
+                </div>
+                <div className="rounded-md border border-border p-2.5 text-center">
+                  <div className="text-lg font-bold text-green-500">{dashboard.completedTasks.length}</div>
+                  <div className="text-[10px] text-text-secondary">已完成</div>
+                </div>
+              </div>
+
+              {dashboard.activeTasks.length > 0 && (
+                <div className="space-y-2">
+                  {dashboard.activeTasks.map((t) => (
+                    <div key={t.id} className="rounded-md border border-border bg-surface p-2.5 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <span className={`inline-block h-2 w-2 rounded-full ${t.status === "receiving" ? "animate-pulse bg-yellow-500"
+                            : "animate-pulse bg-blue-500"
+                            }`} />
+                          {t.status === "receiving" ? "接收中" : "转录中"}
+                        </span>
+                        <span className="text-text-secondary">
+                          {t.clientIp} · {t.modelName}
+                        </span>
+                      </div>
+                      {t.status === "transcribing" && (
+                        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-border">
+                          <div
+                            className="h-full rounded-full bg-blue-500 transition-all"
+                            style={{ width: `${t.progress * 100}%` }}
+                          />
+                        </div>
+                      )}
+                      <div className="mt-1 text-text-secondary">{t.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 远程推理（使用其他设备的推理服务） — 仅桌面端显示 */}
+        {IS_TAURI &&
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold text-text-secondary">
+            远程推理（使用其他设备的推理服务）
+          </h3>
+
+          <div className="rounded-lg border border-border p-4 space-y-3">
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">服务器地址</span>
+              <div className="flex gap-2">
+                <input
+                  className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  placeholder="http://192.168.1.100:3000"
+                  value={settings.remoteUrl}
+                  onChange={(e) => setSettings({ remoteUrl: e.target.value })}
+                />
+                <button
+                  className="shrink-0 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-secondary disabled:opacity-50"
+                  disabled={remoteTesting || !settings.remoteUrl}
+                  onClick={handleTestRemote}
+                >
+                  {remoteTesting ? "测试中..." : "测试连接"}
+                </button>
+              </div>
+            </label>
+
+            {remoteTestResult && (
+              <p className={`text-xs ${remoteTestResult.startsWith("连接成功") ? "text-green-600" : "text-red-600"}`}>
+                {remoteTestResult}
+              </p>
+            )}
+
+            <p className="text-xs text-text-secondary">
+              配置后转录将通过远程服务器执行，留空则使用本机推理
+            </p>
+          </div>
+        </div>}
+
         {/* 转录参数 */}
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-text-secondary">
@@ -573,273 +840,6 @@ export function SettingsPanel() {
             </div>
           </div>
         )}
-
-        {/* Web 服务 — 两种模式均可见 */}
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-text-secondary">
-            Web 服务
-          </h3>
-
-          <div className="rounded-lg border border-border p-4 space-y-4">
-            {IS_TAURI ? (
-              <>
-                {/* 后台 API 服务 */}
-                <div className="flex items-center gap-3">
-                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${serverStatus.running ? "bg-green-500" : "bg-gray-400"}`} />
-                  <label className="flex-1 space-y-1">
-                    <span className="text-sm font-medium">后台 API 端口</span>
-                    <input
-                      type="number"
-                      min={1024}
-                      max={65535}
-                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                      value={settings.inferenceServerPort}
-                      onChange={(e) =>
-                        setSettings({ inferenceServerPort: Math.max(1024, Math.min(65535, Number(e.target.value) || 3000)) })
-                      }
-                      disabled={serverStatus.running}
-                    />
-                  </label>
-                  <button
-                    className={`mt-6 shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${serverStatus.running
-                      ? "bg-red-500 hover:bg-red-600"
-                      : "bg-primary hover:bg-primary-hover"
-                      } disabled:opacity-50`}
-                    disabled={apiLoading}
-                    onClick={handleToggleApi}
-                  >
-                    {apiLoading ? "处理中..." : serverStatus.running ? "停止" : "启动"}
-                  </button>
-                </div>
-
-                {/* Web 前端服务 */}
-                <div className="flex items-center gap-3">
-                  <span className={`inline-block h-2.5 w-2.5 shrink-0 rounded-full ${serverStatus.webRunning ? "bg-green-500" : "bg-gray-400"}`} />
-                  <label className="flex-1 space-y-1">
-                    <span className="text-sm font-medium">Web 前端端口</span>
-                    <input
-                      type="number"
-                      min={1024}
-                      max={65535}
-                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                      value={settings.webPort}
-                      onChange={(e) =>
-                        setSettings({ webPort: Math.max(1024, Math.min(65535, Number(e.target.value) || 8080)) })
-                      }
-                      disabled={serverStatus.webRunning}
-                    />
-                  </label>
-                  <button
-                    className={`mt-6 shrink-0 rounded-lg px-4 py-2 text-sm font-medium text-white ${serverStatus.webRunning
-                      ? "bg-red-500 hover:bg-red-600"
-                      : "bg-primary hover:bg-primary-hover"
-                      } disabled:opacity-50`}
-                    disabled={webLoading}
-                    onClick={handleToggleWeb}
-                  >
-                    {webLoading ? "处理中..." : serverStatus.webRunning ? "停止" : "启动"}
-                  </button>
-                </div>
-
-                {webWarning && (
-                  <p className="text-xs text-amber-500">⚠ {webWarning}</p>
-                )}
-
-                <div className="border-t border-border pt-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <span className="text-sm font-medium">访问鉴权</span>
-                      <p className="text-xs text-text-secondary">为 Web 服务添加简单的用户名/密码验证</p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      className="h-4 w-4 rounded border-border accent-primary"
-                      checked={settings.authEnabled}
-                      onChange={(e) => setSettings({ authEnabled: e.target.checked })}
-                    />
-                  </div>
-
-                  {settings.authEnabled && (
-                    <div className="grid grid-cols-2 gap-3">
-                      <label className="block space-y-1">
-                        <span className="text-xs font-medium text-text-secondary">用户名</span>
-                        <input
-                          type="text"
-                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                          placeholder="admin"
-                          value={settings.authUsername}
-                          onChange={(e) => setSettings({ authUsername: e.target.value })}
-                        />
-                      </label>
-                      <label className="block space-y-1">
-                        <span className="text-xs font-medium text-text-secondary">密码</span>
-                        <input
-                          type="text"
-                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                          placeholder="••••••"
-                          value={settings.authPassword}
-                          onChange={(e) => setSettings({ authPassword: e.target.value })}
-                        />
-                      </label>
-                    </div>
-                  )}
-                  {settings.authEnabled && (
-                    <p className="text-xs text-text-secondary">
-                      启用后访问 Web 服务需要输入用户名和密码。修改鉴权配置后需重启服务生效。
-                    </p>
-                  )}
-                </div>
-
-                <label className="flex items-center justify-between gap-2">
-                  <div>
-                    <span className="text-sm font-medium">启动后自动开启 API 服务</span>
-                    <p className="text-xs text-text-secondary">每次启动应用时自动开启后台 API 推理服务</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-border accent-primary"
-                    checked={settings.apiAutoStart}
-                    onChange={(e) => setSettings({ apiAutoStart: e.target.checked })}
-                  />
-                </label>
-
-                <label className="flex items-center justify-between gap-2">
-                  <div>
-                    <span className="text-sm font-medium">启动后自动开启 Web 界面</span>
-                    <p className="text-xs text-text-secondary">每次启动应用时自动开启 Web 前端，提供浏览器远程访问</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4 rounded border-border accent-primary"
-                    checked={settings.webAutoStart}
-                    onChange={(e) => setSettings({ webAutoStart: e.target.checked })}
-                  />
-                </label>
-
-                <p className="text-xs text-text-secondary">
-                  后台 API 提供推理接口和文件管理。Web 前端提供浏览器可访问的远程界面。
-                </p>
-
-                {serverStatus.webRunning && (
-                  <p className="text-xs text-text-secondary">
-                    浏览器打开{" "}
-                    <a
-                      className="text-primary underline"
-                      href={`http://localhost:${serverStatus.webPort}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      http://localhost:{serverStatus.webPort}
-                    </a>
-                    {" "}即可远程使用
-                  </p>
-                )}
-              </>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-                  <span className="text-text-secondary">
-                    已连接 — Web: {window.location.host}
-                  </span>
-                </div>
-                <p className="text-xs text-text-secondary">
-                  当前通过 Web 远程访问，部分桌面端功能（导入文件、导出、文件管理器操作）不可用。
-                </p>
-              </>
-            )}
-          </div>
-
-          {IS_TAURI && serverStatus.running && dashboard && (
-            <div className="rounded-lg border border-border p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-medium">服务状态</span>
-                <span className="text-xs text-text-secondary">
-                  GPU: {dashboard.gpu ? "可用" : "不可用"}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-md border border-border p-2.5 text-center">
-                  <div className="text-lg font-bold text-blue-500">{dashboard.activeTasks.length}</div>
-                  <div className="text-[10px] text-text-secondary">活跃任务</div>
-                </div>
-                <div className="rounded-md border border-border p-2.5 text-center">
-                  <div className="text-lg font-bold text-green-500">{dashboard.completedTasks.length}</div>
-                  <div className="text-[10px] text-text-secondary">已完成</div>
-                </div>
-              </div>
-
-              {dashboard.activeTasks.length > 0 && (
-                <div className="space-y-2">
-                  {dashboard.activeTasks.map((t) => (
-                    <div key={t.id} className="rounded-md border border-border bg-surface p-2.5 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="flex items-center gap-1.5">
-                          <span className={`inline-block h-2 w-2 rounded-full ${t.status === "receiving" ? "animate-pulse bg-yellow-500"
-                            : "animate-pulse bg-blue-500"
-                            }`} />
-                          {t.status === "receiving" ? "接收中" : "转录中"}
-                        </span>
-                        <span className="text-text-secondary">
-                          {t.clientIp} · {t.modelName}
-                        </span>
-                      </div>
-                      {t.status === "transcribing" && (
-                        <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-border">
-                          <div
-                            className="h-full rounded-full bg-blue-500 transition-all"
-                            style={{ width: `${t.progress * 100}%` }}
-                          />
-                        </div>
-                      )}
-                      <div className="mt-1 text-text-secondary">{t.message}</div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 远程推理（使用其他设备的推理服务） — 仅桌面端显示 */}
-        {IS_TAURI &&
-        <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-text-secondary">
-            远程推理（使用其他设备的推理服务）
-          </h3>
-
-          <div className="rounded-lg border border-border p-4 space-y-3">
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">服务器地址</span>
-              <div className="flex gap-2">
-                <input
-                  className="flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm"
-                  placeholder="http://192.168.1.100:3000"
-                  value={settings.remoteUrl}
-                  onChange={(e) => setSettings({ remoteUrl: e.target.value })}
-                />
-                <button
-                  className="shrink-0 rounded-lg border border-border px-3 py-2 text-sm hover:bg-surface-secondary disabled:opacity-50"
-                  disabled={remoteTesting || !settings.remoteUrl}
-                  onClick={handleTestRemote}
-                >
-                  {remoteTesting ? "测试中..." : "测试连接"}
-                </button>
-              </div>
-            </label>
-
-            {remoteTestResult && (
-              <p className={`text-xs ${remoteTestResult.startsWith("连接成功") ? "text-green-600" : "text-red-600"}`}>
-                {remoteTestResult}
-              </p>
-            )}
-
-            <p className="text-xs text-text-secondary">
-              配置后转录将通过远程服务器执行，留空则使用本机推理
-            </p>
-          </div>
-        </div>}
 
         {/* 模型管理 */}
         <div className="space-y-4">
