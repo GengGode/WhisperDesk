@@ -1,6 +1,7 @@
 import type { AudioFile, TranscriptionStatus } from "@/lib/types";
 import { useAudioStore } from "@/stores/audio-store";
 import { toggleStar } from "@/lib/tauri";
+import { CoverageBar } from "./coverage-bar";
 
 interface FileGridProps {
   files: AudioFile[];
@@ -136,6 +137,11 @@ function GridCard({
         <span className="tabular-nums">{formatDuration(file.duration)}</span>
         <span>{formatSize(file.size)}</span>
       </div>
+
+      {/* 转录覆盖分布条 */}
+      {file.transcriptionCoverage && (
+        <CoverageBar coverage={file.transcriptionCoverage} />
+      )}
 
       {/* 标签 */}
       {file.tags.length > 0 && (

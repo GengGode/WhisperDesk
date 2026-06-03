@@ -1,6 +1,7 @@
 import type { AudioFile, TranscriptionStatus } from "@/lib/types";
 import { useAudioStore } from "@/stores/audio-store";
 import { toggleStar } from "@/lib/tauri";
+import { CoverageBar } from "./coverage-bar";
 
 interface FileItemProps {
   file: AudioFile;
@@ -103,6 +104,11 @@ export function FileItem({ file, visibleIds, onContextMenu }: FileItemProps) {
 
       {/* 文件名 */}
       <span className="min-w-0 flex-1 truncate text-sm">{file.name}</span>
+
+      {/* 转录覆盖分布条 */}
+      {file.transcriptionCoverage && (
+        <CoverageBar coverage={file.transcriptionCoverage} className="mr-3" />
+      )}
 
       {/* 标签 */}
       {file.tags.length > 0 && (

@@ -170,6 +170,7 @@ impl FileIndexService {
             transcription_status: TranscriptionStatus::Pending,
             starred: false,
             tags: vec![],
+            transcription_coverage: None,
         };
         self.upsert_audio(&model)?;
         Ok(model)
@@ -230,20 +231,38 @@ impl FileIndexService {
         })?;
 
         let mut out = Vec::new();
+        let mut completed: Vec<(String, f64)> = Vec::new();
         for row in rows {
             let (id, name, path, format, duration, sample_rate, channels, size,
                  created_at, status_str, starred_int, tags_json):
                 (String, String, String, String, f64, u32, u16, u64,
                  String, String, i32, String) = row?;
+            let status = str_to_status(&status_str);
+            if matches!(status, TranscriptionStatus::Completed) {
+                completed.push((id.clone(), duration));
+            }
             let tags: Vec<String> = serde_json::from_str(&tags_json).unwrap_or_default();
             out.push(AudioFileMeta {
                 id, name, path, format, duration, sample_rate, channels, size,
                 created_at,
-                transcription_status: str_to_status(&status_str),
+                transcription_status: status,
                 starred: starred_int != 0,
                 tags,
+                transcription_coverage: None,
             });
         }
+
+        // 批量加载已完成文件的转录覆盖数据
+        if !completed.is_empty() {
+            if let Ok(coverage_map) = self.load_coverage_batch(&completed) {
+                for file_meta in &mut out {
+                    if let Some(coverage) = coverage_map.get(&file_meta.id) {
+                        file_meta.transcription_coverage = Some(coverage.clone());
+                    }
+                }
+            }
+        }
+
         Ok(out)
     }
 
@@ -272,6 +291,7 @@ impl FileIndexService {
                 transcription_status: str_to_status(&row.get::<_, String>(9)?),
                 starred: row.get::<_, i32>(10)? != 0,
                 tags,
+                transcription_coverage: None,
             }))
         } else {
             Ok(None)
@@ -532,6 +552,76 @@ impl FileIndexService {
         Ok(())
     }
 
+    /// 批量加载多个文件的转录覆盖数据
+    ///
+    /// 只查询已完成转录的文件，每个文件取最新一条转录结果的 segments_json，
+    /// 避免逐条请求造成的 N+1 问题。
+    pub fn load_coverage_batch(
+        &self,
+        file_ids: &[(String, f64)],
+    ) -> Result<std::collections::HashMap<String, Vec<bool>>, AppError> {
+        let conn = Connection::open(&self.db_path)?;
+
+        // 只查询已完成转录的文件
+        let completed_ids: Vec<&str> = file_ids.iter().map(|(id, _)| id.as_str()).collect();
+        if completed_ids.is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+
+        // 构建 IN 子句的占位符
+        let placeholders: Vec<String> = completed_ids.iter().enumerate().map(|(i, _)| format!("?{}", i + 1)).collect();
+        let in_clause = placeholders.join(",");
+
+        let query = format!(
+            "SELECT t.audio_file_id, t.segments_json
+             FROM transcription_results t
+             INNER JOIN (
+                 SELECT audio_file_id, MAX(created_at) AS max_created
+                 FROM transcription_results
+                 WHERE audio_file_id IN ({})
+                 GROUP BY audio_file_id
+             ) latest ON t.audio_file_id = latest.audio_file_id AND t.created_at = latest.max_created",
+            in_clause,
+        );
+
+        let mut stmt = conn.prepare(&query)?;
+        let params: Vec<&dyn rusqlite::types::ToSql> = completed_ids
+            .iter()
+            .map(|id| id as &dyn rusqlite::types::ToSql)
+            .collect();
+
+        let rows = stmt.query_map(params.as_slice(), |row| {
+            let audio_file_id: String = row.get(0)?;
+            let segments_json: String = row.get(1)?;
+            Ok((audio_file_id, segments_json))
+        })?;
+
+        let mut duration_map: std::collections::HashMap<&str, f64> = std::collections::HashMap::new();
+        for (id, dur) in file_ids {
+            duration_map.insert(id.as_str(), *dur);
+        }
+
+        let mut coverage_map = std::collections::HashMap::new();
+        for row in rows {
+            let (audio_file_id, segments_json) = row?;
+            if let Ok(segments) =
+                serde_json::from_str::<Vec<TranscriptionSegment>>(&segments_json)
+            {
+                let duration = duration_map
+                    .get(audio_file_id.as_str())
+                    .copied()
+                    .unwrap_or(0.0);
+                if duration > 0.0 {
+                    coverage_map.insert(
+                        audio_file_id,
+                        compute_coverage(&segments, duration, COVERAGE_BUCKETS),
+                    );
+                }
+            }
+        }
+        Ok(coverage_map)
+    }
+
     /// 通过 result id 获取单条转录结果（导出用）
     pub fn get_transcription_result_by_id(&self, id: &str) -> Result<Option<TranscriptionResult>, AppError> {
         let conn = Connection::open(&self.db_path)?;
@@ -559,6 +649,29 @@ impl FileIndexService {
         }
         Ok(None)
     }
+}
+
+/// 覆盖率分桶数量（每个文件等分为 10 段）
+const COVERAGE_BUCKETS: usize = 10;
+
+/// 根据转录分段计算覆盖分布
+///
+/// 将 `duration` 均分为 `num_buckets` 段，若某段时间范围内存在任意转录分段
+/// （有文本内容），则该桶标记为 true。
+pub fn compute_coverage(segments: &[TranscriptionSegment], duration: f64, num_buckets: usize) -> Vec<bool> {
+    if duration <= 0.0 || num_buckets == 0 {
+        return vec![];
+    }
+    let bucket_width = duration / num_buckets as f64;
+    (0..num_buckets)
+        .map(|i| {
+            let bucket_start = i as f64 * bucket_width;
+            let bucket_end = bucket_start + bucket_width;
+            segments
+                .iter()
+                .any(|seg| seg.start < bucket_end && seg.end > bucket_start)
+        })
+        .collect()
 }
 
 fn status_to_str(status: &TranscriptionStatus) -> &'static str {

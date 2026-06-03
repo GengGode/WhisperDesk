@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { buildFileTree, type FolderNode } from "@/lib/file-tree";
 import type { AudioFile, TranscriptionStatus } from "@/lib/types";
 import { useAudioStore } from "@/stores/audio-store";
+import { CoverageBar } from "@/components/file-manager/coverage-bar";
 
 const STATUS_COLOR: Record<TranscriptionStatus, string> = {
   pending: "bg-text-secondary/40",
@@ -37,7 +38,6 @@ function clampWidth(width: number): number {
 export function FileTreeSidebar() {
   const files = useAudioStore((s) => s.files);
   const selectedFileId = useAudioStore((s) => s.selectedFileId);
-  const expandedFolders = useAudioStore((s) => s.expandedFolders);
   const expandAllFolders = useAudioStore((s) => s.expandAllFolders);
 
   const [width, setWidth] = useState<number>(loadInitialWidth);
@@ -258,6 +258,9 @@ function SidebarFileItem({ file, depth }: { file: AudioFile; depth: number }) {
         }`}
       />
       <span className="min-w-0 flex-1 truncate">{file.name}</span>
+      {file.transcriptionCoverage && (
+        <CoverageBar coverage={file.transcriptionCoverage} className="ml-auto" />
+      )}
     </button>
   );
 }

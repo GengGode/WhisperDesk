@@ -68,6 +68,10 @@ pub struct AudioFileMeta {
     pub transcription_status: TranscriptionStatus,
     pub starred: bool,
     pub tags: Vec<String>,
+    /// 转录覆盖分布：将音频时长均分为若干段，每段是否有转录内容
+    /// None 表示尚未完成转录或无转录数据
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transcription_coverage: Option<Vec<bool>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
