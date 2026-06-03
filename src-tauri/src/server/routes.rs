@@ -70,9 +70,9 @@ pub fn create_router(dashboard: Arc<DashboardState>, auth: AuthConfig) -> Router
         .route("/api/tags", get(list_tags))
         .route("/api/audio/{id}", get(stream_audio))
         .route("/api/cuda", get(cuda_info))
+        .layer(CorsLayer::permissive())
         .layer(axum::middleware::from_fn_with_state(auth, auth_middleware))
         .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
-        .layer(CorsLayer::permissive())
         .with_state(dashboard)
 }
 
@@ -102,8 +102,8 @@ pub fn create_web_router(api_port: u16, auth: AuthConfig) -> Router {
                 async move { Html(h) }
             }
         }))
-        .layer(axum::middleware::from_fn_with_state(auth, auth_middleware))
         .layer(CorsLayer::permissive())
+        .layer(axum::middleware::from_fn_with_state(auth, auth_middleware))
         .with_state(index_html)
 }
 
