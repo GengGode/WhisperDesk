@@ -12,6 +12,8 @@ export interface AudioFile {
   transcriptionStatus: TranscriptionStatus;
   starred: boolean;
   tags: string[];
+  /** 转录覆盖分布：音频均分为10段，每段是否有转录内容 */
+  transcriptionCoverage?: boolean[];
 }
 
 export type TranscriptionStatus =
@@ -243,6 +245,11 @@ export interface AppSettings {
 
   /** 模型下载代理地址，留空则不使用代理（支持 http/https/socks5） */
   downloadProxy: string;
+
+  /** Web 服务鉴权 */
+  authEnabled: boolean;
+  authUsername: string;
+  authPassword: string;
 }
 
 /** 推理服务运行状态 */
@@ -298,6 +305,10 @@ export interface ServerConfig {
   maxRepeatFilter: number;
   enableVad: boolean;
   initialPrompt: string;
+  /** Web 服务鉴权 */
+  authEnabled: boolean;
+  authUsername: string;
+  authPassword: string;
 }
 
 /** Dashboard 快照 */

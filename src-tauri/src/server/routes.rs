@@ -21,6 +21,7 @@ use crate::models::audio::{
 use crate::services::file_index::FileIndexService;
 use crate::services::transcriber::TranscriberService;
 
+use super::auth::{auth_middleware, AuthConfig};
 use super::dashboard::DashboardState;
 
 /// 编译时嵌入前端 SPA 构建产物（`pnpm build` 输出的 `dist/`）
@@ -51,7 +52,7 @@ where
 }
 
 /// 创建后台 API 路由器（推理 + 文件管理 + Dashboard）
-pub fn create_router(dashboard: Arc<DashboardState>) -> Router {
+pub fn create_router(dashboard: Arc<DashboardState>, auth: AuthConfig) -> Router {
     Router::new()
         .route("/", get(dashboard_page))
         .route("/dashboard", get(dashboard_page))
@@ -69,6 +70,7 @@ pub fn create_router(dashboard: Arc<DashboardState>) -> Router {
         .route("/api/tags", get(list_tags))
         .route("/api/audio/{id}", get(stream_audio))
         .route("/api/cuda", get(cuda_info))
+        .layer(axum::middleware::from_fn_with_state(auth, auth_middleware))
         .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
         .layer(CorsLayer::permissive())
         .with_state(dashboard)
@@ -80,7 +82,7 @@ pub fn has_embedded_spa() -> bool {
 }
 
 /// 创建 Web 前端路由器（从编译时嵌入的资源提供 SPA）
-pub fn create_web_router(api_port: u16) -> Router {
+pub fn create_web_router(api_port: u16, auth: AuthConfig) -> Router {
     let raw_index = SpaAssets::get("index.html")
         .map(|f| String::from_utf8_lossy(&f.data).into_owned())
         .unwrap_or_else(|| "<html><body>SPA 未嵌入，请先 pnpm build 再编译 Rust</body></html>".into());
@@ -100,6 +102,7 @@ pub fn create_web_router(api_port: u16) -> Router {
                 async move { Html(h) }
             }
         }))
+        .layer(axum::middleware::from_fn_with_state(auth, auth_middleware))
         .layer(CorsLayer::permissive())
         .with_state(index_html)
 }

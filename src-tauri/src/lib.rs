@@ -114,10 +114,16 @@ pub fn run() {
 }
 
 /// 无头模式：不启动 Tauri GUI，运行 API 服务 + Web 前端
-pub fn run_headless(api_port: u16, web_port: Option<u16>) {
+pub fn run_headless(api_port: u16, web_port: Option<u16>, auth: Option<server::AuthConfig>) {
     let rt = tokio::runtime::Runtime::new().expect("创建 tokio runtime 失败");
     rt.block_on(async {
         let state = server::InferenceServerState::new();
+
+        // 如果命令行指定了鉴权，先设置
+        if let Some(auth_cfg) = auth {
+            state.set_auth_config(auth_cfg).await;
+        }
+
         state.start_api(api_port).await.expect("启动 API 服务失败");
 
         if let Some(wp) = web_port {

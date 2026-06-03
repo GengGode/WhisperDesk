@@ -36,6 +36,10 @@ const defaultSettings: AppSettings = {
   initialPrompt: "",
   enablePunctuation: true,
   downloadProxy: "",
+
+  authEnabled: false,
+  authUsername: "",
+  authPassword: "",
 };
 
 interface SettingsState {

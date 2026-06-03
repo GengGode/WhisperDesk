@@ -1,6 +1,6 @@
 use tauri::State;
 
-use crate::server::{DashboardSnapshot, InferenceServerState, ServerConfig, ServerStatus};
+use crate::server::{AuthConfig, DashboardSnapshot, InferenceServerState, ServerConfig, ServerStatus};
 
 /// 启动后台 API 服务
 #[tauri::command]
@@ -60,9 +60,19 @@ pub fn get_dashboard_status(
 }
 
 #[tauri::command]
-pub fn set_server_config(
+pub async fn set_server_config(
     state: State<'_, InferenceServerState>,
     config: ServerConfig,
-) {
-    state.set_server_config(config);
+) -> Result<(), String> {
+    // 同步转录配置到 Dashboard
+    state.set_server_config(config.clone());
+
+    // 同步鉴权配置到运行状态（重启服务后生效）
+    let auth = AuthConfig {
+        enabled: config.auth_enabled,
+        username: config.auth_username.clone(),
+        password: config.auth_password.clone(),
+    };
+    state.set_auth_config(auth).await;
+    Ok(())
 }

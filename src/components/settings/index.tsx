@@ -96,6 +96,9 @@ export function SettingsPanel() {
       maxRepeatFilter: settings.maxRepeatFilter,
       enableVad: settings.enableVad,
       initialPrompt: settings.initialPrompt,
+      authEnabled: settings.authEnabled,
+      authUsername: settings.authUsername,
+      authPassword: settings.authPassword,
     }).catch(() => { });
   }, [
     settings.modelName, settings.threads, settings.useGpu,
@@ -104,6 +107,7 @@ export function SettingsPanel() {
     settings.noSpeechThold, settings.temperature, settings.temperatureInc,
     settings.maxInitialTs, settings.maxRepeatFilter,
     settings.enableVad, settings.initialPrompt,
+    settings.authEnabled, settings.authUsername, settings.authPassword,
   ]);
 
   useEffect(() => {
@@ -640,6 +644,51 @@ export function SettingsPanel() {
                 {webWarning && (
                   <p className="text-xs text-amber-500">⚠ {webWarning}</p>
                 )}
+
+                <div className="border-t border-border pt-4 space-y-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <span className="text-sm font-medium">访问鉴权</span>
+                      <p className="text-xs text-text-secondary">为 Web 服务添加简单的用户名/密码验证</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-border accent-primary"
+                      checked={settings.authEnabled}
+                      onChange={(e) => setSettings({ authEnabled: e.target.checked })}
+                    />
+                  </div>
+
+                  {settings.authEnabled && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <label className="block space-y-1">
+                        <span className="text-xs font-medium text-text-secondary">用户名</span>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                          placeholder="admin"
+                          value={settings.authUsername}
+                          onChange={(e) => setSettings({ authUsername: e.target.value })}
+                        />
+                      </label>
+                      <label className="block space-y-1">
+                        <span className="text-xs font-medium text-text-secondary">密码</span>
+                        <input
+                          type="text"
+                          className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                          placeholder="••••••"
+                          value={settings.authPassword}
+                          onChange={(e) => setSettings({ authPassword: e.target.value })}
+                        />
+                      </label>
+                    </div>
+                  )}
+                  {settings.authEnabled && (
+                    <p className="text-xs text-text-secondary">
+                      启用后访问 Web 服务需要输入用户名和密码。修改鉴权配置后需重启服务生效。
+                    </p>
+                  )}
+                </div>
 
                 <label className="flex items-center justify-between gap-2">
                   <div>

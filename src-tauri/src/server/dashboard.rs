@@ -41,6 +41,15 @@ pub struct ServerConfig {
     pub enable_vad: bool,
     #[serde(default)]
     pub initial_prompt: String,
+    /// 是否启用 Web 服务鉴权
+    #[serde(default)]
+    pub auth_enabled: bool,
+    /// 鉴权用户名
+    #[serde(default)]
+    pub auth_username: String,
+    /// 鉴权密码（明文）
+    #[serde(default)]
+    pub auth_password: String,
 }
 
 fn default_best_of() -> i32 { 5 }
@@ -71,6 +80,9 @@ impl Default for ServerConfig {
             max_repeat_filter: default_max_repeat_filter(),
             enable_vad: true,
             initial_prompt: String::new(),
+            auth_enabled: false,
+            auth_username: String::new(),
+            auth_password: String::new(),
         }
     }
 }

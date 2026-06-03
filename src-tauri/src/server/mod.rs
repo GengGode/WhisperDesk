@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod dashboard;
 pub mod routes;
 
@@ -8,6 +9,7 @@ use tokio::task::JoinHandle;
 
 use serde::Serialize;
 
+pub use auth::AuthConfig;
 pub use dashboard::{DashboardSnapshot, DashboardState, ServerConfig};
 
 /// 推理服务 + Web 前端 运行时状态
@@ -21,6 +23,8 @@ pub struct InferenceServerState {
     web_handle: Mutex<Option<JoinHandle<()>>>,
     web_shutdown_tx: Mutex<Option<oneshot::Sender<()>>>,
     web_port: AtomicU16,
+    // 鉴权配置
+    auth_config: Mutex<AuthConfig>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -42,7 +46,18 @@ impl InferenceServerState {
             web_handle: Mutex::new(None),
             web_shutdown_tx: Mutex::new(None),
             web_port: AtomicU16::new(0),
+            auth_config: Mutex::new(AuthConfig::new_disabled()),
         }
+    }
+
+    /// 更新鉴权配置
+    pub async fn set_auth_config(&self, cfg: AuthConfig) {
+        *self.auth_config.lock().await = cfg;
+    }
+
+    /// 获取当前鉴权配置
+    pub async fn get_auth_config(&self) -> AuthConfig {
+        self.auth_config.lock().await.clone()
     }
 
     pub fn status(&self) -> ServerStatus {
@@ -80,7 +95,8 @@ impl InferenceServerState {
             .map_err(|e| format!("绑定 API 端口 {port} 失败: {e}"))?;
 
         let dash = self.dashboard.clone();
-        let router = routes::create_router(dash);
+        let auth = self.auth_config.lock().await.clone();
+        let router = routes::create_router(dash, auth);
         let svc = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
 
         let handle = tokio::spawn(async move {
@@ -128,7 +144,8 @@ impl InferenceServerState {
             .await
             .map_err(|e| format!("绑定 Web 端口 {web_port} 失败: {e}"))?;
 
-        let router = routes::create_web_router(api_port);
+        let auth = self.auth_config.lock().await.clone();
+        let router = routes::create_web_router(api_port, auth);
         let svc = router.into_make_service();
 
         let handle = tokio::spawn(async move {
