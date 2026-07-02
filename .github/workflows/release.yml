@@ -34,10 +34,19 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.variant }}
+          shared-key: release
+          cache-on-failure: true
+
       - name: Install LLVM
         uses: KyleMayes/install-llvm-action@v2
         with:
           version: "18.1.8"
+          cached: true
 
       - name: Install CUDA Toolkit
         if: matrix.cuda
