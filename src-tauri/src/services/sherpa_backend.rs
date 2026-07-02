@@ -576,6 +576,7 @@ pub fn transcribe_on_thread(
     _duration: f64,
     _progress_cb: impl Fn(f32, &str) + Clone + Send + 'static,
     _log_cb: impl Fn(&str) + Clone + Send + 'static,
+    _partial_cb: impl Fn(&[crate::models::audio::TranscriptionSegment]) + Clone + Send + 'static,
     _abort_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
     _punct_model_path: Option<String>,
 ) -> Result<(Vec<crate::models::audio::TranscriptionSegment>, String), crate::models::error::AppError> {
