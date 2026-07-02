@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     name: build-${{ matrix.variant }}
-    runs-on: windows-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
@@ -20,10 +20,12 @@ jobs:
             features: whisper-rs-backend
             suffix: cpu
             cuda: false
+            os: windows-latest
           - variant: cuda
             features: whisper-rs-backend,cuda
             suffix: cuda
             cuda: true
+            os: windows-2022
 
     steps:
       - name: Checkout
@@ -52,7 +54,7 @@ jobs:
         if: matrix.cuda
         uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          cuda: "12.9.1"
+          cuda: "12.4.1"
           use-github-cache: true
           use-local-cache: true
 
@@ -74,7 +76,6 @@ jobs:
         run: pnpm tauri build -- --no-default-features --features ${{ matrix.features }}
         env:
           LIBCLANG_PATH: ${{ env.LLVM_PATH }}/bin
-          CMAKE_GENERATOR: Ninja
 
       - name: Rename artifacts
         shell: pwsh
