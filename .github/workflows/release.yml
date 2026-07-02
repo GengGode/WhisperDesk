@@ -74,6 +74,7 @@ jobs:
         run: pnpm tauri build -- --no-default-features --features ${{ matrix.features }}
         env:
           LIBCLANG_PATH: ${{ env.LLVM_PATH }}/bin
+          CMAKE_GENERATOR: Ninja
 
       - name: Rename artifacts
         shell: pwsh
