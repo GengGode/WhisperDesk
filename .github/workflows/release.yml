@@ -60,12 +60,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+        run: pnpm tauri build -- --no-default-features --features ${{ matrix.features }}
         env:
           LIBCLANG_PATH: ${{ env.LLVM_PATH }}/bin
-        with:
-          projectPath: src-tauri
-          args: --no-default-features --features ${{ matrix.features }}
 
       - name: Rename artifacts
         shell: pwsh
