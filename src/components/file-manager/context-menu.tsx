@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { IS_TAURI, deleteAudioFile, toggleStar, relocateFolder, relocateFile } from "@/lib/tauri";
+import { IS_TAURI, deleteAudioFile, toggleStar, relocateFolder, relocateFile, importLrc, listAudioFiles } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import { usePlayerStore } from "@/stores/player-store";
@@ -106,6 +106,28 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
         onClose();
         enqueueFiles([state.file.id]);
         if (!queueRunning) setQueueRunning(true);
+      },
+    },
+    {
+      label: "导入歌词 (LRC)",
+      tauriOnly: true,
+      action: async () => {
+        onClose();
+        try {
+          const { open } = await import("@tauri-apps/plugin-dialog");
+          const selected = await open({
+            title: "选择 LRC 歌词文件",
+            filters: [{ name: "LRC 歌词", extensions: ["lrc"] }],
+            multiple: false,
+          });
+          if (!selected) return;
+          const lrcPath = typeof selected === "string" ? selected : selected;
+          await importLrc(state.file.id, lrcPath as string);
+          const files = await listAudioFiles();
+          useAudioStore.getState().setFiles(files);
+        } catch (err) {
+          console.error("[歌词] 导入 LRC 失败", err);
+        }
       },
     },
     {

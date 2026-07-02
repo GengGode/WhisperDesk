@@ -15,7 +15,9 @@ import {
   testRemoteConnection,
 } from "@/lib/tauri";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { emit } from "@tauri-apps/api/event";
 import { useTranscriptionStore } from "@/stores/transcription-store";
+import { usePlayerStore } from "@/stores/player-store";
 import type { DashboardSnapshot, ServerStatus, ThemeMode, TranscriptionBackend, WhisperModel } from "@/lib/types";
 
 const WHISPER_MODEL_NAMES = ["tiny", "base", "small", "medium", "large-v3-turbo", "large-v3"] as const;
@@ -77,6 +79,16 @@ export function SettingsPanel() {
 
   const [dashboard, setDashboard] = useState<DashboardSnapshot | null>(null);
   const dashPollRef = useRef<ReturnType<typeof setInterval>>(undefined);
+
+  const desktopLyricsVisible = usePlayerStore((s) => s.desktopLyricsVisible);
+
+  useEffect(() => {
+    if (!IS_TAURI || !desktopLyricsVisible) return;
+    void emit("lyrics-config", {
+      fontSize: settings.lyricsFontSize,
+      theme: settings.lyricsTheme,
+    });
+  }, [settings.lyricsFontSize, settings.lyricsTheme, desktopLyricsVisible]);
 
   useEffect(() => {
     setServerConfig({

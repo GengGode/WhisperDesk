@@ -158,21 +158,48 @@ export type PlayMode = "sequential" | "loop-all" | "loop-one" | "shuffle";
 /** 歌词同步事件载荷（主窗口 → 歌词窗口） */
 export interface LyricsSyncPayload {
   time: number;
+  /** 切歌时才携带，正常播放中省略以减小 IPC 载荷 */
+  fileName?: string;
+  /** 切歌时才携带 */
+  segments?: TranscriptionSegment[];
+}
+
+/** 歌词窗口内部维护的完整同步状态 */
+export interface LyricsSyncState {
+  time: number;
   fileName: string;
   segments: TranscriptionSegment[];
 }
+
+/** 歌词显示模式 */
+export type LyricsDisplayMode = "dual-line" | "scroll";
+
+/** 窗口毛玻璃背景效果类型 */
+export type LyricsBackdropEffect = "none" | "blur" | "acrylic" | "mica";
 
 /** 桌面歌词样式配置 */
 export interface LyricsSettings {
   fontSize: number;
   theme: "light" | "dark" | "classic";
   clickThrough: boolean;
+  /** 歌词时间偏移（秒），正值表示歌词延后显示 */
+  timeOffset: number;
+  /** 显示模式 */
+  displayMode: LyricsDisplayMode;
+  /** 背景不透明度 0-100，0 为完全透明，100 为半透明黑底 */
+  bgOpacity: number;
+  /** 窗口毛玻璃背景效果（仅 Windows） */
+  backdropEffect: LyricsBackdropEffect;
 }
 
 export const defaultLyricsSettings: LyricsSettings = {
   fontSize: 28,
   theme: "classic",
   clickThrough: false,
+  timeOffset: 0,
+  displayMode: "dual-line",
+  bgOpacity: 1,
+  backdropEffect: "none",
 };
 
 export type ExportFormat = "txt" | "srt" | "json" | "lrc";

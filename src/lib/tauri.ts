@@ -528,3 +528,17 @@ export async function saveLyricsWindowPosition(x: number, y: number): Promise<vo
   if (!IS_TAURI) return;
   return invoke<void>("save_lyrics_window_position", { x, y });
 }
+
+/** 设置歌词窗口毛玻璃背景效果 */
+export async function setLyricsBackdrop(
+  effect: string,
+  color?: [number, number, number, number],
+): Promise<void> {
+  if (!IS_TAURI) return;
+  return invoke<void>("set_lyrics_backdrop", { effect, color });
+}
+
+/** 导入 LRC 歌词文件并关联到音频，返回新建的转录结果 ID */
+export async function importLrc(audioFileId: string, lrcPath: string): Promise<string> {
+  return invoke<string>("import_lrc", { audioFileId, lrcPath });
+}

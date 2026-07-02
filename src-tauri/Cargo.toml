@@ -45,6 +45,7 @@ rust-embed = { version = "8", features = ["interpolate-folder-path", "include-ex
 mime_guess = "2"
 tokio-stream = "0.1"
 eventsource-stream = "0.2"
+encoding_rs = "0.8"
 
 # dev 模式下对音频解码库开编译优化，否则解码极慢
 [profile.dev.package.symphonia]

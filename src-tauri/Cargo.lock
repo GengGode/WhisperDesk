@@ -5761,6 +5761,7 @@ dependencies = [
  "bzip2 0.5.2",
  "cc",
  "chrono",
+ "encoding_rs",
  "eventsource-stream",
  "mime_guess",
  "reqwest 0.12.28",

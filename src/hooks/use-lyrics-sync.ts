@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { emit, listen } from "@tauri-apps/api/event";
 import { IS_TAURI, getTranscriptionResults } from "@/lib/tauri";
 import type { LyricsSyncPayload } from "@/lib/types";
@@ -10,12 +10,19 @@ const SYNC_INTERVAL_MS = 200;
 
 /**
  * 主窗口向歌词窗口推送播放进度与字幕分段。
+ *
+ * 优化策略：
+ *   - 切歌 / 首次同步 / 转录结果加载后 → 推送完整载荷（time + fileName + segments）
+ *   - 正常播放中 → 仅推送 { time }，避免每 200ms 发送大量 segments 数据
  */
 export function useLyricsSync() {
   const desktopLyricsVisible = usePlayerStore((s) => s.desktopLyricsVisible);
   const setResults = useTranscriptionStore((s) => s.setResults);
 
-  const buildPayload = useCallback((): LyricsSyncPayload => {
+  const lastSyncedFileIdRef = useRef<string | null>(null);
+  const forceFullRef = useRef(true);
+
+  const buildFullPayload = useCallback((): LyricsSyncPayload => {
     const { currentIndex, queue, currentTime } = usePlayerStore.getState();
     const files = useAudioStore.getState().files;
     const results = useTranscriptionStore.getState().results;
@@ -33,41 +40,53 @@ export function useLyricsSync() {
     const fileResults = results.get(fileId) ?? [];
     const segments = fileResults[0]?.segments ?? [];
 
-    return {
-      time: currentTime,
-      fileName: file.name,
-      segments,
-    };
+    return { time: currentTime, fileName: file.name, segments };
   }, []);
 
   const pushSync = useCallback(() => {
-    void emit("lyrics-sync", buildPayload());
-  }, [buildPayload]);
+    const { currentIndex, queue, currentTime } = usePlayerStore.getState();
+    const fileId = currentIndex >= 0 ? (queue[currentIndex] ?? null) : null;
 
-  /** 歌词窗口可见时定时推送；暂停时 currentTime 不变也能持续同步 */
+    const needFull = forceFullRef.current || fileId !== lastSyncedFileIdRef.current;
+
+    if (needFull) {
+      forceFullRef.current = false;
+      lastSyncedFileIdRef.current = fileId;
+      void emit("lyrics-sync", buildFullPayload());
+    } else {
+      void emit("lyrics-sync", { time: currentTime } satisfies LyricsSyncPayload);
+    }
+  }, [buildFullPayload]);
+
+  /** 强制下次推送发送完整载荷 */
+  const requestFullSync = useCallback(() => {
+    forceFullRef.current = true;
+    pushSync();
+  }, [pushSync]);
+
   useEffect(() => {
     if (!IS_TAURI || !desktopLyricsVisible) return;
 
+    forceFullRef.current = true;
+    lastSyncedFileIdRef.current = null;
     pushSync();
     const id = setInterval(pushSync, SYNC_INTERVAL_MS);
     return () => clearInterval(id);
   }, [desktopLyricsVisible, pushSync]);
 
-  /** 歌词窗口就绪时立即推送一次 */
   useEffect(() => {
     if (!IS_TAURI) return;
 
     const unlisten = listen("lyrics-ready", () => {
       if (!usePlayerStore.getState().desktopLyricsVisible) return;
-      pushSync();
+      requestFullSync();
     });
 
     return () => {
       void unlisten.then((off) => off());
     };
-  }, [pushSync]);
+  }, [requestFullSync]);
 
-  /** 若内存中无转录结果，后台加载后触发同步 */
   useEffect(() => {
     if (!IS_TAURI || !desktopLyricsVisible) return;
 
@@ -83,11 +102,11 @@ export function useLyricsSync() {
       .then((stored) => {
         if (stored.length > 0) {
           setResults(fileId, stored);
-          pushSync();
+          requestFullSync();
         }
       })
       .catch(() => {
         /* 忽略加载失败 */
       });
-  }, [desktopLyricsVisible, pushSync, setResults]);
+  }, [desktopLyricsVisible, requestFullSync, setResults]);
 }

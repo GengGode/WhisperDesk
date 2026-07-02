@@ -3,7 +3,7 @@ mod models;
 pub mod server;
 mod services;
 
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::menu::{Menu, MenuItem};
 use tauri_plugin_autostart::MacosLauncher;
@@ -43,6 +43,8 @@ pub fn run() {
             commands::lyrics::toggle_desktop_lyrics,
             commands::lyrics::set_lyrics_click_through,
             commands::lyrics::save_lyrics_window_position,
+            commands::lyrics::set_lyrics_backdrop,
+            commands::lyrics::import_lrc,
             commands::server::start_api_server,
             commands::server::stop_api_server,
             commands::server::start_web_server,
@@ -55,8 +57,10 @@ pub fn run() {
         .setup(|app| {
             let show_item = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
             let hide_item = MenuItem::with_id(app, "hide", "隐藏主界面", true, None::<&str>)?;
+            let lyrics_unlock = MenuItem::with_id(app, "lyrics_unlock", "解锁歌词穿透", true, None::<&str>)?;
+            let lyrics_close = MenuItem::with_id(app, "lyrics_close", "关闭桌面歌词", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show_item, &hide_item, &quit_item])?;
+            let menu = Menu::with_items(app, &[&show_item, &hide_item, &lyrics_unlock, &lyrics_close, &quit_item])?;
 
             TrayIconBuilder::new()
                 .icon(app.default_window_icon().unwrap().clone())
@@ -73,6 +77,19 @@ pub fn run() {
                         "hide" => {
                             if let Some(win) = app.get_webview_window("main") {
                                 let _ = win.hide();
+                            }
+                        }
+                        "lyrics_unlock" => {
+                            if let Some(win) = app.get_webview_window("lyrics") {
+                                let _ = win.set_ignore_cursor_events(false);
+                                let _ = app.emit("lyrics-config", serde_json::json!({"clickThrough": false}));
+                            }
+                        }
+                        "lyrics_close" => {
+                            if let Some(win) = app.get_webview_window("lyrics") {
+                                commands::lyrics::save_window_geometry(&win);
+                                let _ = win.close();
+                                let _ = app.emit("lyrics-window-closed", ());
                             }
                         }
                         "quit" => {

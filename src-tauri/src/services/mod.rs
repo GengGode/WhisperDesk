@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod cuda;
 pub mod file_index;
+pub mod lrc;
 pub mod paths;
 pub mod sherpa_backend;
 pub mod transcriber;

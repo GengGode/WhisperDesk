@@ -52,6 +52,7 @@ body,
   text-align: center;
   line-height: 1.4;
   text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+  animation: lyrics-fade-in 0.3s ease-out;
 }
 
 .lyrics-next {
@@ -60,6 +61,18 @@ body,
   opacity: 0.65;
   text-align: center;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+  animation: lyrics-fade-in 0.25s ease-out;
+}
+
+@keyframes lyrics-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .lyrics-theme-classic .lyrics-current {
@@ -93,6 +106,29 @@ body,
   color: #cbd5e1;
 }
 
+/* 毛玻璃模式：系统合成器提供背景，CSS 层不再需要 alpha hack */
+
+/* WebView2 必须有非零 alpha 才能接收鼠标事件，0.01 几乎不可见 */
+.lyrics-root.glass .lyrics-drag-region {
+  background: rgba(0, 0, 0, 0.01) !important;
+}
+
+.lyrics-root.glass .lyrics-current {
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.5);
+}
+
+.lyrics-root.glass .lyrics-next {
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+}
+
+.lyrics-root.glass.lyrics-theme-light .lyrics-current {
+  text-shadow: 0 1px 4px rgba(255, 255, 255, 0.6);
+}
+
+.lyrics-root.glass.lyrics-theme-light .lyrics-next {
+  text-shadow: 0 1px 3px rgba(255, 255, 255, 0.5);
+}
+
 .lyrics-menu {
   position: fixed;
   z-index: 100;
@@ -119,4 +155,113 @@ body,
 
 .lyrics-menu button:hover {
   background: rgba(255, 255, 255, 0.08);
+}
+
+/* 滚动歌词模式 */
+
+.lyrics-scroll-container {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  width: 100%;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 15%,
+    black 85%,
+    transparent 100%
+  );
+}
+
+.lyrics-scroll-container::-webkit-scrollbar {
+  display: none;
+}
+
+.lyrics-scroll-line {
+  text-align: center;
+  padding: 4px 8px;
+  line-height: 1.5;
+  opacity: 0.4;
+  transition: opacity 0.3s ease, font-size 0.3s ease, transform 0.3s ease;
+}
+
+.lyrics-scroll-line.active {
+  opacity: 1;
+  font-weight: 700;
+}
+
+.lyrics-theme-classic .lyrics-scroll-line {
+  color: #cbd5e1;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.lyrics-theme-classic .lyrics-scroll-line.active {
+  color: #ffffff;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+}
+
+.lyrics-theme-light .lyrics-scroll-line {
+  color: #94a3b8;
+}
+.lyrics-theme-light .lyrics-scroll-line.active {
+  color: #1e293b;
+  text-shadow: 0 1px 2px rgba(255, 255, 255, 0.8);
+}
+
+.lyrics-theme-dark .lyrics-scroll-line {
+  color: #64748b;
+}
+.lyrics-theme-dark .lyrics-scroll-line.active {
+  color: #f8fafc;
+}
+
+/* 悬浮播放控制栏 */
+
+.lyrics-toolbar {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  animation: toolbar-fade-in 0.2s ease-out forwards;
+}
+
+@keyframes toolbar-fade-in {
+  to {
+    opacity: 0.8;
+  }
+}
+
+.lyrics-toolbar button {
+  border: none;
+  background: rgba(15, 23, 42, 0.6);
+  color: #f1f5f9;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.lyrics-toolbar button:hover {
+  background: rgba(15, 23, 42, 0.85);
+}
+
+.lyrics-menu-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: rgba(255, 255, 255, 0.1);
 }

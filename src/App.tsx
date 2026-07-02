@@ -56,8 +56,44 @@ function App() {
     const unlisten = listen("lyrics-window-closed", () => {
       usePlayerStore.getState().setDesktopLyricsVisible(false);
     });
+    const unlistenSettings = listen<{ fontSize?: number; theme?: string }>(
+      "lyrics-settings-changed",
+      (event) => {
+        const p = event.payload;
+        const patch: Record<string, unknown> = {};
+        if (typeof p.fontSize === "number") patch.lyricsFontSize = p.fontSize;
+        if (p.theme) patch.lyricsTheme = p.theme;
+        if (Object.keys(patch).length > 0) {
+          useSettingsStore.getState().setSettings(patch);
+        }
+      },
+    );
+    const unlistenPlayerAction = listen<{ action: string; time?: number }>(
+      "lyrics-player-action",
+      (event) => {
+        const store = usePlayerStore.getState();
+        switch (event.payload.action) {
+          case "toggle":
+            store.togglePlay();
+            break;
+          case "next":
+            store.next();
+            break;
+          case "previous":
+            store.previous();
+            break;
+          case "seek":
+            if (typeof event.payload.time === "number") {
+              store.seek(event.payload.time);
+            }
+            break;
+        }
+      },
+    );
     return () => {
       void unlisten.then((off) => off());
+      void unlistenSettings.then((off) => off());
+      void unlistenPlayerAction.then((off) => off());
     };
   }, []);
 
