@@ -50,9 +50,11 @@ jobs:
 
       - name: Install CUDA Toolkit
         if: matrix.cuda
-        uses: Jimver/cuda-toolkit@v0.2.15
+        uses: Jimver/cuda-toolkit@v0.2.35
         with:
-          cuda: "12.6.3"
+          cuda: "12.9.1"
+          use-github-cache: true
+          use-local-cache: true
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
