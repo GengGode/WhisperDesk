@@ -14,6 +14,11 @@ fn portable_base() -> Result<PathBuf, AppError> {
     Ok(base)
 }
 
+/// 应用数据根目录（`data/`）
+pub fn app_data_dir() -> Result<PathBuf, AppError> {
+    portable_base()
+}
+
 pub fn db_path() -> Result<PathBuf, AppError> {
     Ok(portable_base()?.join("whisperdesk.db"))
 }

@@ -1,5 +1,6 @@
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
+import { usePlayerStore } from "@/stores/player-store";
 import { IS_TAURI, toggleStar, deleteAudioFile } from "@/lib/tauri";
 
 interface BatchBarProps {
@@ -15,6 +16,7 @@ export function BatchBar({ onOpenTagEditor }: BatchBarProps) {
   const enqueueFiles = useTranscriptionStore((s) => s.enqueueFiles);
   const setQueueRunning = useTranscriptionStore((s) => s.setQueueRunning);
   const queueRunning = useTranscriptionStore((s) => s.queueRunning);
+  const playFiles = usePlayerStore((s) => s.playFiles);
 
   const count = selectedFileIds.size;
   if (count === 0) return null;
@@ -59,6 +61,15 @@ export function BatchBar({ onOpenTagEditor }: BatchBarProps) {
 
       <div className="h-4 w-px bg-border" />
 
+      <button
+        onClick={() => {
+          playFiles(selectedIds);
+          clearSelection();
+        }}
+        className="rounded-lg bg-surface-secondary px-3 py-1 text-xs font-medium transition-colors hover:bg-primary/10 hover:text-primary"
+      >
+        播放所选
+      </button>
       <button
         onClick={handleBatchTranscribe}
         className="rounded-lg bg-primary px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-primary/90"

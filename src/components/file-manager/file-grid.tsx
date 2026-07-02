@@ -1,5 +1,6 @@
 import type { AudioFile, TranscriptionStatus } from "@/lib/types";
 import { useAudioStore } from "@/stores/audio-store";
+import { usePlayerStore } from "@/stores/player-store";
 import { toggleStar } from "@/lib/tauri";
 import { CoverageBar } from "./coverage-bar";
 
@@ -51,6 +52,7 @@ function GridCard({
   const selectRange = useAudioStore((s) => s.selectRange);
   const updateFile = useAudioStore((s) => s.updateFile);
   const setTagFilter = useAudioStore((s) => s.setTagFilter);
+  const playFile = usePlayerStore((s) => s.playFile);
 
   const isFocused = selectedFileId === file.id;
   const isChecked = selectedFileIds.has(file.id);
@@ -83,6 +85,7 @@ function GridCard({
   return (
     <button
       onClick={handleClick}
+      onDoubleClick={() => playFile(file.id)}
       onContextMenu={(e) => onContextMenu(e, file)}
       className={`group relative flex flex-col gap-2 rounded-xl border p-3 text-left transition-colors ${
         isFocused

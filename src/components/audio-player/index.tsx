@@ -1,18 +1,6 @@
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
-
-const VOLUME_STORAGE_KEY = "whisperdesk.playbackVolume";
-
-function readStoredVolume(): number {
-  try {
-    const raw = localStorage.getItem(VOLUME_STORAGE_KEY);
-    if (raw == null) return 100;
-    const n = Number(raw);
-    if (!Number.isFinite(n)) return 100;
-    return Math.min(100, Math.max(0, Math.round(n)));
-  } catch {
-    return 100;
-  }
-}
+import { forwardRef, useEffect, useImperativeHandle } from "react";
+import { usePlayerStore } from "@/stores/player-store";
+import { audioEngine } from "@/lib/audio-engine";
 
 export interface AudioPlayerHandle {
   togglePlay: () => void;
@@ -21,153 +9,92 @@ export interface AudioPlayerHandle {
 }
 
 interface AudioPlayerProps {
-  /** Tauri 模式：本地文件路径；浏览器模式：HTTP URL（如 /api/audio/:id） */
-  src: string;
+  /** 当前编辑器/面板关联的文件 ID */
+  fileId: string;
   seekTime?: number;
   seekVersion?: number;
-  /** 循环播放区间，播放超出 end 时自动跳回 start */
-  loopRange?: { start: number; end: number } | null;
   onTimeUpdate?: (time: number) => void;
 }
 
 export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(
-  function AudioPlayer({ src, seekTime, seekVersion, loopRange, onTimeUpdate }, ref) {
-    const audioRef = useRef<HTMLAudioElement>(null);
-    const [isPlaying, setIsPlaying] = useState(false);
-    const [duration, setDuration] = useState(0);
-    const [position, setPosition] = useState(0);
-    const [error, setError] = useState<string | null>(null);
-    const [volume, setVolume] = useState(readStoredVolume);
-    const [muted, setMuted] = useState(false);
-    const volumeBeforeMuteRef = useRef(volume);
+  function AudioPlayer({ fileId, seekTime, seekVersion, onTimeUpdate }, ref) {
+    const currentIndex = usePlayerStore((s) => s.currentIndex);
+    const queue = usePlayerStore((s) => s.queue);
+    const status = usePlayerStore((s) => s.status);
+    const currentTime = usePlayerStore((s) => s.currentTime);
+    const duration = usePlayerStore((s) => s.duration);
+    const volume = usePlayerStore((s) => s.volume);
+    const muted = usePlayerStore((s) => s.muted);
+    const error = usePlayerStore((s) => s.error);
 
-    const applyVolume = useCallback((audio: HTMLAudioElement, vol: number, isMuted: boolean) => {
-      audio.volume = vol / 100;
-      audio.muted = isMuted;
-    }, []);
+    const togglePlay = usePlayerStore((s) => s.togglePlay);
+    const seek = usePlayerStore((s) => s.seek);
+    const setVolume = usePlayerStore((s) => s.setVolume);
+    const toggleMute = usePlayerStore((s) => s.toggleMute);
+    const ensureFile = usePlayerStore((s) => s.ensureFile);
+
+    const isCurrentFile =
+      currentIndex >= 0 && queue[currentIndex] === fileId;
+    const isPlaying = isCurrentFile && status === "playing";
+    const displayTime = isCurrentFile ? currentTime : 0;
+    const displayDuration = isCurrentFile ? duration : 0;
+    const progress =
+      displayDuration > 0 ? (displayTime / displayDuration) * 100 : 0;
 
     useEffect(() => {
-      const audio = audioRef.current;
-      if (!audio) return;
-      applyVolume(audio, volume, muted);
-    }, [src, volume, muted, applyVolume]);
+      if (!isCurrentFile) return;
+      onTimeUpdate?.(currentTime);
+    }, [isCurrentFile, currentTime, onTimeUpdate]);
 
-    const handleVolumeChange = (next: number) => {
-      const clamped = Math.min(100, Math.max(0, Math.round(next)));
-      setVolume(clamped);
-      if (clamped > 0) {
-        setMuted(false);
-        volumeBeforeMuteRef.current = clamped;
-      }
-      try {
-        localStorage.setItem(VOLUME_STORAGE_KEY, String(clamped));
-      } catch {
-        /* 忽略存储失败 */
-      }
-    };
-
-    const toggleMute = () => {
-      if (muted) {
-        const restore = volumeBeforeMuteRef.current > 0 ? volumeBeforeMuteRef.current : 100;
-        setVolume(restore);
-        setMuted(false);
-        try {
-          localStorage.setItem(VOLUME_STORAGE_KEY, String(restore));
-        } catch {
-          /* 忽略 */
-        }
-        return;
-      }
-      volumeBeforeMuteRef.current = volume > 0 ? volume : 100;
-      setMuted(true);
-    };
-
-    const progress = useMemo(() => {
-      if (duration <= 0) return 0;
-      return (position / duration) * 100;
-    }, [duration, position]);
-
-    useImperativeHandle(ref, () => ({
-      togglePlay: () => {
-        const audio = audioRef.current;
-        if (!audio) return;
-        if (audio.paused) {
-          audio.play().catch((err) => setError(String(err)));
-        } else {
-          audio.pause();
-        }
-      },
-      get isPlaying() {
-        return isPlaying;
-      },
-      get audioElement() {
-        return audioRef.current;
-      },
-    }), [isPlaying]);
-
-    // seekVersion 变化时跳转到 seekTime
     useEffect(() => {
-      const audio = audioRef.current;
-      if (!audio || seekTime == null || seekVersion == null) return;
-      audio.currentTime = seekTime;
-      setPosition(seekTime);
+      if (seekTime == null || seekVersion == null) return;
+      ensureFile(fileId);
+      seek(seekTime);
       onTimeUpdate?.(seekTime);
     }, [seekVersion]);
 
-    const handleTimeUpdate = (e: React.SyntheticEvent<HTMLAudioElement>) => {
-      const value = e.currentTarget.currentTime;
-      setPosition(value);
-      onTimeUpdate?.(value);
+    useImperativeHandle(
+      ref,
+      () => ({
+        togglePlay: () => {
+          ensureFile(fileId);
+          if (isCurrentFile) {
+            togglePlay();
+          } else {
+            usePlayerStore.getState().playFile(fileId);
+          }
+        },
+        get isPlaying() {
+          return isPlaying;
+        },
+        get audioElement() {
+          return audioEngine.getElement();
+        },
+      }),
+      [fileId, isCurrentFile, isPlaying, togglePlay, ensureFile],
+    );
 
-      // 循环播放：超出区间 end 时跳回 start
-      if (loopRange && value >= loopRange.end) {
-        const audio = audioRef.current;
-        if (audio) {
-          audio.currentTime = loopRange.start;
-          setPosition(loopRange.start);
-          onTimeUpdate?.(loopRange.start);
-        }
+    const handleTogglePlay = () => {
+      ensureFile(fileId);
+      if (isCurrentFile) {
+        togglePlay();
+      } else {
+        usePlayerStore.getState().playFile(fileId);
       }
     };
 
     return (
       <div className="rounded-lg border border-border bg-surface p-3">
-        <audio
-          ref={audioRef}
-          src={src}
-          preload="metadata"
-          onTimeUpdate={handleTimeUpdate}
-          onLoadedMetadata={(e) => {
-            setDuration(e.currentTarget.duration || 0);
-            setError(null);
-          }}
-          onPlay={() => setIsPlaying(true)}
-          onPause={() => setIsPlaying(false)}
-          onError={(e) => {
-            const code = e.currentTarget.error?.code;
-            const msg = e.currentTarget.error?.message || "未知错误";
-            setError(`音频加载失败 (code=${code}): ${msg}`);
-          }}
-        />
-
         <div className="mb-2 flex flex-wrap items-center gap-3">
           <button
             type="button"
             className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-surface-secondary"
-            onClick={() => {
-              const audio = audioRef.current;
-              if (!audio) return;
-              if (audio.paused) {
-                audio.play().catch((err) => setError(String(err)));
-              } else {
-                audio.pause();
-              }
-            }}
+            onClick={handleTogglePlay}
           >
             {isPlaying ? "暂停" : "播放"}
           </button>
           <span className="text-xs text-text-secondary">
-            {formatTime(position)} / {formatTime(duration)}
+            {formatTime(displayTime)} / {formatTime(displayDuration)}
           </span>
           <div className="ml-auto flex min-w-[140px] flex-1 items-center gap-2 sm:max-w-[200px] sm:flex-none">
             <button
@@ -186,7 +113,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(
               value={muted ? 0 : volume}
               className="h-1.5 min-w-0 flex-1 cursor-pointer accent-primary"
               aria-label="音量"
-              onChange={(e) => handleVolumeChange(Number(e.target.value))}
+              onChange={(e) => setVolume(Number(e.target.value))}
             />
             <span className="w-8 shrink-0 text-right text-xs tabular-nums text-text-secondary">
               {muted ? 0 : volume}%
@@ -194,7 +121,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(
           </div>
         </div>
 
-        {error && (
+        {error && isCurrentFile && (
           <div className="mb-2 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-600">
             {error}
           </div>
@@ -207,11 +134,11 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(
           value={progress}
           className="w-full"
           onChange={(e) => {
-            const next = (Number(e.target.value) / 100) * duration;
-            const audio = audioRef.current;
-            if (!audio || !Number.isFinite(next)) return;
-            audio.currentTime = next;
-            setPosition(next);
+            const next = (Number(e.target.value) / 100) * displayDuration;
+            if (!Number.isFinite(next)) return;
+            ensureFile(fileId);
+            seek(next);
+            onTimeUpdate?.(next);
           }}
         />
       </div>
@@ -226,7 +153,6 @@ function formatTime(seconds: number): string {
   return `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
-/** 音量图标（内联 SVG，避免额外依赖） */
 function VolumeIcon({ muted, level }: { muted: boolean; level: number }) {
   if (muted || level === 0) {
     return (

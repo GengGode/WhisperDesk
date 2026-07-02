@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { IS_TAURI, deleteAudioFile, toggleStar, relocateFolder, relocateFile } from "@/lib/tauri";
 import { useAudioStore } from "@/stores/audio-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
+import { usePlayerStore } from "@/stores/player-store";
 import type { AudioFile, RelocateResult } from "@/lib/types";
 import type { FolderNode } from "@/lib/file-tree";
 
@@ -25,6 +26,9 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
   const enqueueFiles = useTranscriptionStore((s) => s.enqueueFiles);
   const queueRunning = useTranscriptionStore((s) => s.queueRunning);
   const setQueueRunning = useTranscriptionStore((s) => s.setQueueRunning);
+  const playFile = usePlayerStore((s) => s.playFile);
+  const playNextAfterCurrent = usePlayerStore((s) => s.playNextAfterCurrent);
+  const enqueue = usePlayerStore((s) => s.enqueue);
 
   useEffect(() => {
     function handleDown(e: MouseEvent) {
@@ -55,6 +59,27 @@ export function ContextMenu({ state, onClose, onEditTags }: ContextMenuProps) {
   });
 
   const items: { label: string; danger?: boolean; action: () => void; tauriOnly?: boolean }[] = [
+    {
+      label: "播放",
+      action: () => {
+        onClose();
+        playFile(state.file.id);
+      },
+    },
+    {
+      label: "下一首播放",
+      action: () => {
+        onClose();
+        playNextAfterCurrent([state.file.id]);
+      },
+    },
+    {
+      label: "添加到播放队列",
+      action: () => {
+        onClose();
+        enqueue([state.file.id]);
+      },
+    },
     {
       label: state.file.starred ? "取消收藏" : "收藏",
       action: async () => {
@@ -193,6 +218,8 @@ export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderCo
   const setQueueRunning = useTranscriptionStore((s) => s.setQueueRunning);
   const toggleSelect = useAudioStore((s) => s.toggleSelect);
   const selectedFileIds = useAudioStore((s) => s.selectedFileIds);
+  const playFiles = usePlayerStore((s) => s.playFiles);
+  const enqueue = usePlayerStore((s) => s.enqueue);
 
   useEffect(() => {
     function handleDown(e: MouseEvent) {
@@ -224,7 +251,23 @@ export function FolderContextMenu({ state, onClose, onRelocateResult }: FolderCo
 
   const allFiles = collectAllFiles(state.folder);
 
+  const fileIds = allFiles.map((f) => f.id);
+
   const items: { label: string; action: () => void; tauriOnly?: boolean }[] = [
+    {
+      label: `播放文件夹（${allFiles.length} 个文件）`,
+      action: () => {
+        onClose();
+        if (fileIds.length > 0) playFiles(fileIds);
+      },
+    },
+    {
+      label: `添加到播放队列（${allFiles.length} 个文件）`,
+      action: () => {
+        onClose();
+        enqueue(fileIds);
+      },
+    },
     {
       label: `批量转录（${allFiles.length} 个文件）`,
       action: () => {

@@ -8,11 +8,11 @@ import {
   updateTranscriptionResult,
   exportTranscription,
   exportFormats,
-  getAudioUrl,
   transcribeAudio,
   analyzeVad,
 } from "@/lib/tauri";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePlayerStore } from "@/stores/player-store";
 import type { ExportFormat, VadConfig, VadSegment } from "@/lib/types";
 import { defaultVadConfig } from "@/lib/types";
 import { AudioPlayer, type AudioPlayerHandle } from "@/components/audio-player";
@@ -60,7 +60,17 @@ export function EditorPanel() {
   const audioPlayerRef = useRef<AudioPlayerHandle>(null);
   const subtitleEditorRef = useRef<SubtitleEditorHandle>(null);
 
+  const playerCurrentTime = usePlayerStore((s) => s.currentTime);
+  const playerCurrentIndex = usePlayerStore((s) => s.currentIndex);
+  const playerQueue = usePlayerStore((s) => s.queue);
+  const playerSeek = usePlayerStore((s) => s.seek);
+  const playerEnsureFile = usePlayerStore((s) => s.ensureFile);
   const [currentTime, setCurrentTime] = useState(0);
+
+  const isPlayerOnEditorFile =
+    playerCurrentIndex >= 0 &&
+    audioFileId != null &&
+    playerQueue[playerCurrentIndex] === audioFileId;
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [activeResultIndex, setActiveResultIndex] = useState(0);
@@ -161,10 +171,15 @@ export function EditorPanel() {
   const activeSegment = activeSegmentIndex >= 0 ? segments[activeSegmentIndex] : undefined;
 
   const handleSeek = useCallback((time: number) => {
+    if (audioFileId) {
+      playerEnsureFile(audioFileId);
+      playerSeek(time);
+    }
+    setCurrentTime(time);
     setSeekTime(time);
     seekVersionRef.current += 1;
     setSeekVersion(seekVersionRef.current);
-  }, []);
+  }, [audioFileId, playerEnsureFile, playerSeek]);
 
   // 波形视图状态同步：canvasWidth + scrollLeft → 时间轴
   const timelineScrollRef = useRef<HTMLDivElement>(null);
@@ -225,6 +240,21 @@ export function EditorPanel() {
   const handleTimeUpdate = useCallback((time: number) => {
     setCurrentTime(time);
   }, []);
+
+  // 播放器正在播放编辑器文件时，同步时间轴
+  useEffect(() => {
+    if (isPlayerOnEditorFile) {
+      setCurrentTime(playerCurrentTime);
+    }
+  }, [isPlayerOnEditorFile, playerCurrentTime]);
+
+  // 循环播放区间：超出 end 时跳回 start
+  useEffect(() => {
+    if (!loopSegment || !isPlayerOnEditorFile) return;
+    if (playerCurrentTime >= loopSegment.end) {
+      handleSeek(loopSegment.start);
+    }
+  }, [loopSegment, isPlayerOnEditorFile, playerCurrentTime, handleSeek]);
 
   const handleSave = useCallback(async () => {
     if (!resultId || saving) return;
@@ -564,10 +594,9 @@ export function EditorPanel() {
 
         <AudioPlayer
           ref={audioPlayerRef}
-          src={audioFileId ? getAudioUrl(audioFileId, audioFilePath) : audioFilePath}
+          fileId={audioFileId ?? ""}
           seekTime={seekTime}
           seekVersion={seekVersion}
-          loopRange={loopSegment}
           onTimeUpdate={handleTimeUpdate}
         />
 

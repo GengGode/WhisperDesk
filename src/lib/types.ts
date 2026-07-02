@@ -152,6 +152,29 @@ export const defaultVadConfig: VadConfig = {
   paddingMs: 100,
 };
 
+/** 播放模式 */
+export type PlayMode = "sequential" | "loop-all" | "loop-one" | "shuffle";
+
+/** 歌词同步事件载荷（主窗口 → 歌词窗口） */
+export interface LyricsSyncPayload {
+  time: number;
+  fileName: string;
+  segments: TranscriptionSegment[];
+}
+
+/** 桌面歌词样式配置 */
+export interface LyricsSettings {
+  fontSize: number;
+  theme: "light" | "dark" | "classic";
+  clickThrough: boolean;
+}
+
+export const defaultLyricsSettings: LyricsSettings = {
+  fontSize: 28,
+  theme: "classic",
+  clickThrough: false,
+};
+
 export type ExportFormat = "txt" | "srt" | "json" | "lrc";
 
 export interface ExportRequest {
@@ -250,6 +273,13 @@ export interface AppSettings {
   authEnabled: boolean;
   authUsername: string;
   authPassword: string;
+
+  /** 桌面歌词默认字体大小 */
+  lyricsFontSize: number;
+  /** 桌面歌词默认主题 */
+  lyricsTheme: LyricsSettings["theme"];
+  /** 启动时自动开启桌面歌词 */
+  lyricsAutoStart: boolean;
 }
 
 /** 推理服务运行状态 */

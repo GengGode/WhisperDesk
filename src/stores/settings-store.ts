@@ -40,6 +40,10 @@ const defaultSettings: AppSettings = {
   authEnabled: false,
   authUsername: "",
   authPassword: "",
+
+  lyricsFontSize: 28,
+  lyricsTheme: "classic",
+  lyricsAutoStart: false,
 };
 
 interface SettingsState {

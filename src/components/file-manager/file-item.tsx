@@ -1,5 +1,6 @@
 import type { AudioFile, TranscriptionStatus } from "@/lib/types";
 import { useAudioStore } from "@/stores/audio-store";
+import { usePlayerStore } from "@/stores/player-store";
 import { toggleStar } from "@/lib/tauri";
 import { CoverageBar } from "./coverage-bar";
 
@@ -36,6 +37,7 @@ export function FileItem({ file, visibleIds, onContextMenu }: FileItemProps) {
   const selectRange = useAudioStore((s) => s.selectRange);
   const updateFile = useAudioStore((s) => s.updateFile);
   const setTagFilter = useAudioStore((s) => s.setTagFilter);
+  const playFile = usePlayerStore((s) => s.playFile);
 
   const isFocused = selectedFileId === file.id;
   const isChecked = selectedFileIds.has(file.id);
@@ -68,6 +70,7 @@ export function FileItem({ file, visibleIds, onContextMenu }: FileItemProps) {
   return (
     <button
       onClick={handleClick}
+      onDoubleClick={() => playFile(file.id)}
       onContextMenu={(e) => onContextMenu(e, file)}
       className={`group flex w-full items-center gap-1.5 rounded-lg px-2 py-2 text-left transition-colors ${
         isFocused

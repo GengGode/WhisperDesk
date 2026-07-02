@@ -13,6 +13,14 @@ export default defineConfig(async () => ({
       "@": resolve(__dirname, "src"),
     },
   },
+  build: {
+    rollupOptions: {
+      input: {
+        main: resolve(__dirname, "index.html"),
+        lyrics: resolve(__dirname, "lyrics.html"),
+      },
+    },
+  },
   clearScreen: false,
   server: {
     port: 1420,

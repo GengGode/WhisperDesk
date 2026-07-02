@@ -16,12 +16,17 @@ import {
   listenWhisperLog,
   startApiServer,
   startWebServer,
+  toggleDesktopLyrics,
 } from "@/lib/tauri";
+import { emit, listen } from "@tauri-apps/api/event";
 import { useAudioStore } from "@/stores/audio-store";
 import { useSettingsStore } from "@/stores/settings-store";
 import { useTranscriptionStore } from "@/stores/transcription-store";
 import { useTranscriptionQueue } from "@/hooks/use-transcription-queue";
 import { useTheme } from "@/hooks/use-theme";
+import { useLyricsSync } from "@/hooks/use-lyrics-sync";
+import { PlayerBar } from "@/components/player-bar";
+import { usePlayerStore } from "@/stores/player-store";
 
 type Page = "files" | "transcription" | "editor" | "logs" | "settings";
 
@@ -36,8 +41,25 @@ function App() {
   const initCuda = useSettingsStore((s) => s.initCuda);
   const showFileTree = page !== "files" && page !== "settings";
 
+  const initEngine = usePlayerStore((s) => s.initEngine);
+
   useTheme();
   useTranscriptionQueue();
+  useLyricsSync();
+
+  useEffect(() => {
+    initEngine();
+  }, [initEngine]);
+
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    const unlisten = listen("lyrics-window-closed", () => {
+      usePlayerStore.getState().setDesktopLyricsVisible(false);
+    });
+    return () => {
+      void unlisten.then((off) => off());
+    };
+  }, []);
 
   useEffect(() => {
     if (IS_TAURI) {
@@ -59,6 +81,22 @@ function App() {
         startWebServer(webPort, inferenceServerPort).catch((err) =>
           console.warn("[App] Web 前端启动失败:", err),
         );
+      }
+
+      const { lyricsAutoStart, lyricsFontSize, lyricsTheme } =
+        useSettingsStore.getState().settings;
+      if (lyricsAutoStart) {
+        toggleDesktopLyrics()
+          .then((visible) => {
+            usePlayerStore.getState().setDesktopLyricsVisible(visible);
+            if (visible) {
+              void emit("lyrics-config", {
+                fontSize: lyricsFontSize,
+                theme: lyricsTheme,
+              });
+            }
+          })
+          .catch((err) => console.warn("[App] 桌面歌词启动失败:", err));
       }
     }
 
@@ -113,6 +151,7 @@ function App() {
           {page === "settings" && <SettingsPanel />}
         </main>
       </div>
+      <PlayerBar />
     </div>
   );
 }

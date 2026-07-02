@@ -301,6 +301,64 @@ export function SettingsPanel() {
           </div>
         </div>
 
+        {/* 桌面歌词 */}
+        {IS_TAURI && (
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-text-secondary">桌面歌词</h3>
+            <div className="rounded-lg border border-border p-4 space-y-4">
+              <label className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-sm font-medium">启动时自动开启</span>
+                  <p className="text-xs text-text-secondary">应用启动后自动显示桌面歌词窗口</p>
+                </div>
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-primary"
+                  checked={settings.lyricsAutoStart}
+                  onChange={(e) => setSettings({ lyricsAutoStart: e.target.checked })}
+                />
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">默认字体大小</span>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={16}
+                    max={48}
+                    step={2}
+                    className="flex-1 accent-primary"
+                    value={settings.lyricsFontSize}
+                    onChange={(e) =>
+                      setSettings({ lyricsFontSize: Number(e.target.value) })
+                    }
+                  />
+                  <span className="w-10 text-right text-sm tabular-nums text-text-secondary">
+                    {settings.lyricsFontSize}
+                  </span>
+                </div>
+              </label>
+
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">默认颜色主题</span>
+                <select
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm"
+                  value={settings.lyricsTheme}
+                  onChange={(e) =>
+                    setSettings({
+                      lyricsTheme: e.target.value as typeof settings.lyricsTheme,
+                    })
+                  }
+                >
+                  <option value="classic">经典（白字描边）</option>
+                  <option value="light">浅色</option>
+                  <option value="dark">深色</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        )}
+
         {/* Web 服务 — 两种模式均可见 */}
         <div className="space-y-4">
           <h3 className="text-sm font-semibold text-text-secondary">

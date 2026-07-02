@@ -508,3 +508,23 @@ export function getAudioUrl(fileId: string, filePath: string): string {
   }
   return `${API_BASE}/api/audio/${fileId}`;
 }
+
+// ── 桌面歌词（仅桌面端） ──
+
+/** 切换桌面歌词窗口，返回切换后是否可见 */
+export async function toggleDesktopLyrics(): Promise<boolean> {
+  if (!IS_TAURI) return false;
+  return invoke<boolean>("toggle_desktop_lyrics");
+}
+
+/** 设置歌词窗口鼠标穿透 */
+export async function setLyricsClickThrough(enabled: boolean): Promise<void> {
+  if (!IS_TAURI) return;
+  return invoke<void>("set_lyrics_click_through", { enabled });
+}
+
+/** 保存歌词窗口位置 */
+export async function saveLyricsWindowPosition(x: number, y: number): Promise<void> {
+  if (!IS_TAURI) return;
+  return invoke<void>("save_lyrics_window_position", { x, y });
+}

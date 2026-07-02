@@ -4,7 +4,6 @@ import { ArticleView } from "@/components/editor/article-view";
 import { Waveform } from "@/components/editor/waveform";
 import {
   abortTranscription,
-  getAudioUrl,
   getTranscriptionResults,
   transcribeAudio,
 } from "@/lib/tauri";
@@ -231,7 +230,7 @@ export function TranscriptionPanel() {
         )}
 
         <AudioPlayer
-          src={getAudioUrl(selectedFile.id, selectedFile.path)}
+          fileId={selectedFile.id}
           seekTime={seekTime}
           seekVersion={seekVersion}
           onTimeUpdate={handleTimeUpdate}
